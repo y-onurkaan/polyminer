@@ -502,16 +502,13 @@
         left: 0;
         width: 100%;
         display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-        align-items: center;
+        justify-content: space-between;
+        align-items: flex-end;
         padding: 8px 12px max(12px, env(safe-area-inset-bottom)) 12px;
         pointer-events: none;
         z-index: 50;
-        touch-action: none;
         user-select: none;
         -webkit-user-select: none;
-        -webkit-touch-callout: none;
       }
       #mobile-controls.force-hide {
         display: none !important;
@@ -520,19 +517,10 @@
         display: flex !important;
       }
 
-      .controls-layout {
-        width: 100%;
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-end;
-        pointer-events: none;
-      }
-
       .touch-btn {
         pointer-events: auto;
         user-select: none;
         -webkit-user-select: none;
-        -webkit-touch-callout: none;
         touch-action: none;
         background: rgba(15, 23, 42, 0.85);
         border: 1.5px solid rgba(71, 85, 105, 0.8);
@@ -561,9 +549,6 @@
         flex-direction: column;
         align-items: center;
         gap: 6px;
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
       }
       .dpad-horizontal-row {
         display: flex;
@@ -590,9 +575,6 @@
         flex-direction: column;
         align-items: flex-end;
         gap: 6px;
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
       }
       .touch-action-row {
         display: flex;
@@ -627,176 +609,6 @@
         border: 1px solid #38bdf8;
         min-width: 14px;
         text-align: center;
-      }
-
-      /* SANAL ANALOG JOYSTICK LAYOUT */
-      #touch-joystick-wrapper {
-        pointer-events: auto;
-        padding: 4px;
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
-        -webkit-touch-callout: none;
-      }
-      #joystick-base {
-        width: 130px;
-        height: 130px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(15, 23, 42, 0.7) 0%, rgba(15, 23, 42, 0.92) 70%, rgba(30, 41, 59, 0.98) 100%);
-        border: 2px solid rgba(56, 189, 248, 0.6);
-        box-shadow: 0 0 20px rgba(56, 189, 248, 0.3), inset 0 0 16px rgba(56, 189, 248, 0.15);
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
-        -webkit-touch-callout: none;
-        cursor: grab;
-      }
-      #joystick-base:active {
-        cursor: grabbing;
-      }
-
-      .joy-guide-axis {
-        position: absolute;
-        background: rgba(148, 163, 184, 0.25);
-        pointer-events: none;
-      }
-      .joy-axis-y {
-        width: 1.5px;
-        height: 100%;
-        top: 0;
-        left: calc(50% - 0.75px);
-      }
-      .joy-axis-x {
-        height: 1.5px;
-        width: 100%;
-        left: 0;
-        top: calc(50% - 0.75px);
-      }
-      .joy-guide-deadzone {
-        position: absolute;
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        border: 1px dashed rgba(56, 189, 248, 0.35);
-        pointer-events: none;
-      }
-
-      #joystick-knob {
-        width: 52px;
-        height: 52px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 35% 35%, #38bdf8 0%, #0284c7 50%, #0f172a 100%);
-        border: 2.5px solid #bae6fd;
-        box-shadow: 0 0 16px rgba(56, 189, 248, 0.8), inset 0 2px 4px rgba(255, 255, 255, 0.6);
-        position: absolute;
-        top: calc(50% - 26px);
-        left: calc(50% - 26px);
-        pointer-events: none;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        will-change: transform;
-      }
-      #joystick-knob.returning {
-        transition: transform 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      }
-      .knob-core {
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 0 8px #ffffff;
-      }
-
-      /* JOYSTICK ACTIONS (RIGHT) */
-      #touch-joystick-actions {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 8px;
-        pointer-events: none;
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
-      }
-      .joy-action-row {
-        display: flex;
-        gap: 6px;
-        pointer-events: auto;
-      }
-      .joy-action-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 10px;
-        font-size: 17px;
-      }
-      .joy-thrust-row {
-        pointer-events: auto;
-      }
-      .joy-thrust-btn {
-        width: 136px;
-        height: 54px;
-        border-radius: 14px;
-        background: linear-gradient(135deg, rgba(14, 116, 144, 0.75) 0%, rgba(2, 132, 199, 0.88) 100%);
-        border: 2px solid #38bdf8;
-        box-shadow: 0 0 16px rgba(56, 189, 248, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
-        flex-direction: row;
-        gap: 8px;
-        font-family: monospace;
-        font-weight: bold;
-        letter-spacing: 1px;
-      }
-      .joy-thrust-btn:active, .joy-thrust-btn.active {
-        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
-        border-color: #7dd3fc;
-        box-shadow: 0 0 24px rgba(56, 189, 248, 0.9);
-        transform: scale(0.95);
-      }
-      .joy-thrust-glyph {
-        font-size: 22px;
-      }
-      .joy-thrust-label {
-        font-size: 13px;
-        color: #f0f9ff;
-        text-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
-      }
-
-      /* FLOATING MODE SWITCHER BAR */
-      #touch-mode-switcher-bar {
-        width: 100%;
-        display: flex;
-        justify-content: center;
-        margin-bottom: 8px;
-        pointer-events: none;
-      }
-      .touch-mode-pill-btn {
-        pointer-events: auto;
-        background: rgba(15, 23, 42, 0.9);
-        border: 1.5px solid #0284c7;
-        color: #38bdf8;
-        font-family: monospace;
-        font-size: 11px;
-        font-weight: bold;
-        padding: 5px 14px;
-        border-radius: 20px;
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
-        cursor: pointer;
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
-        -webkit-touch-callout: none;
-        transition: all 0.12s ease;
-      }
-      .touch-mode-pill-btn:active {
-        transform: scale(0.95);
-        background: #0284c7;
-        color: #ffffff;
       }
 
       /* MEDIA QUERIES */
@@ -977,7 +789,6 @@
         <!-- Sound, Help, Reset & Gamepad Actions -->
         <div class="hud-item" style="gap:4px;">
           <button id="btn-open-coop" class="btn-icon" style="background:rgba(6,182,212,0.18); border:1px solid #06b6d4; color:#22d3ee; font-weight:bold; font-size:10.5px; padding:3px 8px; border-radius:4px; cursor:pointer;" title="Online Eşli Oyun (P2P Co-op)">🌐 CO-OP (Tek Kişi)</button>
-          <button id="btn-switch-control-mode" class="btn-icon" style="background:rgba(56,189,248,0.18); border:1px solid #0284c7; color:#38bdf8; font-weight:bold; font-size:10px; padding:3px 7px; border-radius:4px; cursor:pointer;" title="Kontrol Modu: Tuşlar ⇄ Joystick">🕹️ Tuşlar</button>
           <button id="btn-toggle-controls" class="btn-icon" title="Dokunmatik Kumandaları Aç/Kapat">🎮</button>
           <button id="btn-toggle-sound" class="btn-icon" title="Sesi Aç/Kapat">🔊</button>
           <button id="btn-open-help" class="btn-icon" title="Nasıl Oynanır? [H]">[ ? ]</button>
@@ -990,108 +801,49 @@
 
       <!-- MOBILE VIRTUAL GAMEPAD OVERLAY -->
       <div id="mobile-controls">
-        <!-- FLOATING CONTROL MODE SWITCHER PILL -->
-        <div id="touch-mode-switcher-bar">
-          <button id="btn-toggle-layout-mode" class="touch-mode-pill-btn" title="Kontrol Modunu Değiştir (Tuşlar / Joystick)">
-            🕹️ <span id="current-control-mode-label">Kontrol: Tuşlar ⇄ Joystick</span>
+        <!-- LEFT: DIRECTION & THRUST CLUSTER (D-PAD) -->
+        <div id="touch-dpad">
+          <button class="touch-btn dpad-btn" id="btn-touch-up" data-key="ArrowUp" aria-label="Yukarı / Roket İtki">
+            <span class="btn-glyph">🚀</span>
           </button>
-        </div>
-
-        <!-- 1. KLASİK TUŞ TAKIMI (D-PAD) DÜZENİ -->
-        <div id="controls-dpad-layout" class="controls-layout">
-          <!-- LEFT: DIRECTION & THRUST CLUSTER (D-PAD) -->
-          <div id="touch-dpad">
-            <button class="touch-btn dpad-btn" id="btn-touch-up" data-key="ArrowUp" aria-label="Yukarı / Roket İtki">
-              <span class="btn-glyph">🚀</span>
+          <div class="dpad-horizontal-row">
+            <button class="touch-btn dpad-btn" id="btn-touch-left" data-key="ArrowLeft" aria-label="Sol">
+              <span class="btn-glyph">⬅️</span>
             </button>
-            <div class="dpad-horizontal-row">
-              <button class="touch-btn dpad-btn" id="btn-touch-left" data-key="ArrowLeft" aria-label="Sol">
-                <span class="btn-glyph">⬅️</span>
-              </button>
-              <button class="touch-btn dpad-btn" id="btn-touch-down" data-key="ArrowDown" aria-label="Aşağı / Kaz">
-                <span class="btn-glyph">⬇️</span>
-              </button>
-              <button class="touch-btn dpad-btn" id="btn-touch-right" data-key="ArrowRight" aria-label="Sağ">
-                <span class="btn-glyph">➡️</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- RIGHT: CONSUMABLES & SHAFT ACTIONS -->
-          <div id="touch-actions">
-            <div class="touch-action-row">
-              <button class="touch-btn action-btn rail-btn" id="btn-touch-rail" data-action="elevatorRails" title="Asansör Rayı Döşe [C]">
-                <span class="btn-glyph">🏗️</span>
-                <span class="touch-badge" id="touch-badge-rail">0</span>
-              </button>
-              <button class="touch-btn action-btn dyn-btn" id="btn-touch-dyn" data-action="dynamite" title="Sismik Dinamit [X]">
-                <span class="btn-glyph">💣</span>
-                <span class="touch-badge" id="touch-badge-dyn">0</span>
-              </button>
-            </div>
-            <div class="touch-action-row">
-              <button class="touch-btn action-btn fuel-btn" id="btn-touch-fuel" data-action="fuelCanister" title="Yedek Yakıt [R]">
-                <span class="btn-glyph">⛽</span>
-                <span class="touch-badge" id="touch-badge-fuel">0</span>
-              </button>
-              <button class="touch-btn action-btn rep-btn" id="btn-touch-repair" data-action="repairKit" title="Tamir Kiti [T]">
-                <span class="btn-glyph">🔧</span>
-                <span class="touch-badge" id="touch-badge-repair">0</span>
-              </button>
-              <button class="touch-btn action-btn tp-btn" id="btn-touch-tp" data-action="teleporter" title="Yüzeye Işınlayıcı [Q]">
-                <span class="btn-glyph">🌀</span>
-                <span class="touch-badge" id="touch-badge-tp">0</span>
-              </button>
-            </div>
+            <button class="touch-btn dpad-btn" id="btn-touch-down" data-key="ArrowDown" aria-label="Aşağı / Kaz">
+              <span class="btn-glyph">⬇️</span>
+            </button>
+            <button class="touch-btn dpad-btn" id="btn-touch-right" data-key="ArrowRight" aria-label="Sağ">
+              <span class="btn-glyph">➡️</span>
+            </button>
           </div>
         </div>
 
-        <!-- 2. SANAL ANALOG JOYSTICK DÜZENİ -->
-        <div id="controls-joystick-layout" class="controls-layout" style="display:none;">
-          <!-- SOL ALT: SANAL ANALOG JOYSTICK -->
-          <div id="touch-joystick-wrapper">
-            <div id="joystick-base">
-              <div class="joy-guide-axis joy-axis-y"></div>
-              <div class="joy-guide-axis joy-axis-x"></div>
-              <div class="joy-guide-deadzone"></div>
-              <div id="joystick-knob">
-                <div class="knob-core"></div>
-              </div>
-            </div>
+        <!-- RIGHT: CONSUMABLES & SHAFT ACTIONS -->
+        <div id="touch-actions">
+          <div class="touch-action-row">
+            <button class="touch-btn action-btn rail-btn" id="btn-touch-rail" data-action="elevatorRails" title="Asansör Rayı Döşe [C]">
+              <span class="btn-glyph">🏗️</span>
+              <span class="touch-badge" id="touch-badge-rail">0</span>
+            </button>
+            <button class="touch-btn action-btn dyn-btn" id="btn-touch-dyn" data-action="dynamite" title="Sismik Dinamit [X]">
+              <span class="btn-glyph">💣</span>
+              <span class="touch-badge" id="touch-badge-dyn">0</span>
+            </button>
           </div>
-
-          <!-- SAĞ ALT: BÜYÜK ROKET + HIZLI EKİPMAN BARI -->
-          <div id="touch-joystick-actions">
-            <!-- Hızlı Ekipman Tuşları -->
-            <div class="joy-action-row">
-              <button class="touch-btn joy-action-btn rail-btn" id="btn-joy-rail" data-action="elevatorRails" title="Asansör Rayı Döşe [C]">
-                <span class="btn-glyph">🏗️</span>
-                <span class="touch-badge" id="joy-badge-rail">0</span>
-              </button>
-              <button class="touch-btn joy-action-btn dyn-btn" id="btn-joy-dyn" data-action="dynamite" title="Sismik Dinamit [X]">
-                <span class="btn-glyph">💣</span>
-                <span class="touch-badge" id="joy-badge-dyn">0</span>
-              </button>
-              <button class="touch-btn joy-action-btn fuel-btn" id="btn-joy-fuel" data-action="fuelCanister" title="Yedek Yakıt [R]">
-                <span class="btn-glyph">⛽</span>
-                <span class="touch-badge" id="joy-badge-fuel">0</span>
-              </button>
-              <button class="touch-btn joy-action-btn rep-btn" id="btn-joy-repair" data-action="repairKit" title="Tamir Kiti [T]">
-                <span class="btn-glyph">🔧</span>
-                <span class="touch-badge" id="joy-badge-repair">0</span>
-              </button>
-              <button class="touch-btn joy-action-btn tp-btn" id="btn-joy-tp" data-action="teleporter" title="Yüzeye Işınlayıcı [Q]">
-                <span class="btn-glyph">🌀</span>
-                <span class="touch-badge" id="joy-badge-tp">0</span>
-              </button>
-            </div>
-            <!-- Büyük Roket İtki Butonu -->
-            <div class="joy-thrust-row">
-              <button class="touch-btn joy-thrust-btn" id="btn-joy-rocket" aria-label="Roket İtki [W]">
-                <span class="joy-thrust-glyph">🚀</span>
-                <span class="joy-thrust-label">ROKET</span>
-              </button>
-            </div>
+          <div class="touch-action-row">
+            <button class="touch-btn action-btn fuel-btn" id="btn-touch-fuel" data-action="fuelCanister" title="Yedek Yakıt [R]">
+              <span class="btn-glyph">⛽</span>
+              <span class="touch-badge" id="touch-badge-fuel">0</span>
+            </button>
+            <button class="touch-btn action-btn rep-btn" id="btn-touch-repair" data-action="repairKit" title="Tamir Kiti [T]">
+              <span class="btn-glyph">🔧</span>
+              <span class="touch-badge" id="touch-badge-repair">0</span>
+            </button>
+            <button class="touch-btn action-btn tp-btn" id="btn-touch-tp" data-action="teleporter" title="Yüzeye Işınlayıcı [Q]">
+              <span class="btn-glyph">🌀</span>
+              <span class="touch-badge" id="touch-badge-tp">0</span>
+            </button>
           </div>
         </div>
       </div>

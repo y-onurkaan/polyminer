@@ -479,39 +479,18 @@ export class UIManager {
       this.badgeMuseum.style.color = found > 0 ? '#f59e0b' : '#64748b';
     }
 
-    // Mobile Virtual Gamepad Badges (Both D-Pad & Joystick modes)
+    // Mobile Virtual Gamepad Badges
     const touchBadgeRail = document.getElementById('touch-badge-rail');
     const touchBadgeFuel = document.getElementById('touch-badge-fuel');
     const touchBadgeRepair = document.getElementById('touch-badge-repair');
     const touchBadgeDyn = document.getElementById('touch-badge-dyn');
     const touchBadgeTp = document.getElementById('touch-badge-tp');
 
-    const joyBadgeRail = document.getElementById('joy-badge-rail');
-    const joyBadgeFuel = document.getElementById('joy-badge-fuel');
-    const joyBadgeRepair = document.getElementById('joy-badge-repair');
-    const joyBadgeDyn = document.getElementById('joy-badge-dyn');
-    const joyBadgeTp = document.getElementById('joy-badge-tp');
-
-    const railStr = `${player.inventory.elevatorRails || 0}`;
-    const fuelStr = `${fuelCount || 0}`;
-    const repairStr = `${repairCount || 0}`;
-    const dynStr = `${dynCount || 0}`;
-    const tpStr = `${tpCount || 0}`;
-
-    if (touchBadgeRail) touchBadgeRail.innerText = railStr;
-    if (joyBadgeRail) joyBadgeRail.innerText = railStr;
-
-    if (touchBadgeFuel) touchBadgeFuel.innerText = fuelStr;
-    if (joyBadgeFuel) joyBadgeFuel.innerText = fuelStr;
-
-    if (touchBadgeRepair) touchBadgeRepair.innerText = repairStr;
-    if (joyBadgeRepair) joyBadgeRepair.innerText = repairStr;
-
-    if (touchBadgeDyn) touchBadgeDyn.innerText = dynStr;
-    if (joyBadgeDyn) joyBadgeDyn.innerText = dynStr;
-
-    if (touchBadgeTp) touchBadgeTp.innerText = tpStr;
-    if (joyBadgeTp) joyBadgeTp.innerText = tpStr;
+    if (touchBadgeRail) touchBadgeRail.innerText = `${player.inventory.elevatorRails || 0}`;
+    if (touchBadgeFuel) touchBadgeFuel.innerText = `${player.inventory.fuelCanister || 0}`;
+    if (touchBadgeRepair) touchBadgeRepair.innerText = `${player.inventory.repairKit || 0}`;
+    if (touchBadgeDyn) touchBadgeDyn.innerText = `${player.inventory.dynamite || 0}`;
+    if (touchBadgeTp) touchBadgeTp.innerText = `${player.inventory.teleporter || 0}`;
 
     // 7. Station & Elevator Status
     if (player.elevatorAuto) {
