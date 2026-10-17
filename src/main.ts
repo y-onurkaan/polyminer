@@ -387,7 +387,7 @@ function setupMobileControls() {
     btn.addEventListener('pointerdown', (e: Event) => {
       e.preventDefault();
       btn.classList.add('active');
-      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen();
+      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
       if (!isAnyModalOpen) {
         useConsumableItem(player, itemKey, world);
       }
@@ -404,6 +404,327 @@ function setupMobileControls() {
   bindConsumable(btnRepair, 'repairKit');
   bindConsumable(btnDyn, 'dynamite');
   bindConsumable(btnTp, 'teleporter');
+
+  // ==========================================
+  // 2. SANAL ANALOG JOYSTICK MODU
+  // ==========================================
+  const joyBase = document.getElementById('joystick-base');
+  const joyKnob = document.getElementById('joystick-knob');
+  let joyActiveTouchId: number | null = null;
+  const JOY_DEADZONE = 18; // > 18px ölü bölge (deadzone)
+  const JOY_MAX_RADIUS = 44; // Merkeze göre maksimum topuz mesafesi
+
+  const clearDirectionKeys = () => {
+    keysDown['ArrowUp'] = false;
+    keysDown['KeyW'] = false;
+    keysDown['w'] = false;
+    keysDown['W'] = false;
+
+    keysDown['ArrowDown'] = false;
+    keysDown['KeyS'] = false;
+    keysDown['s'] = false;
+    keysDown['S'] = false;
+
+    keysDown['ArrowLeft'] = false;
+    keysDown['KeyA'] = false;
+    keysDown['a'] = false;
+    keysDown['A'] = false;
+
+    keysDown['ArrowRight'] = false;
+    keysDown['KeyD'] = false;
+    keysDown['d'] = false;
+    keysDown['D'] = false;
+  };
+
+  const updateJoystickPosition = (clientX: number, clientY: number) => {
+    if (!joyBase || !joyKnob) return;
+    const rect = joyBase.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    const dist = Math.hypot(dx, dy);
+
+    // Topuzun görsel konumu (maksimum yarıçapa göre kenetlenir)
+    let knobX = dx;
+    let knobY = dy;
+    if (dist > JOY_MAX_RADIUS) {
+      knobX = (dx / dist) * JOY_MAX_RADIUS;
+      knobY = (dy / dist) * JOY_MAX_RADIUS;
+    }
+    joyKnob.classList.remove('returning');
+    joyKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+
+    // Deadzone kontrolü ve yön atamaları
+    if (dist <= JOY_DEADZONE) {
+      clearDirectionKeys();
+    } else {
+      const normX = dx / dist;
+      const normY = dy / dist;
+      const THRESHOLD = 0.38; // 8-yönlü akıcı açı aralığı (~cos 67.5°)
+
+      const goLeft = normX < -THRESHOLD;
+      const goRight = normX > THRESHOLD;
+      const goDown = normY > THRESHOLD;
+      const goUp = normY < -THRESHOLD;
+
+      // Asansör çift tık otomatik kayma kontrolü (Yukarı veya Aşağı hızlı çekiş)
+      const now = performance.now();
+      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
+      if (!isAnyModalOpen) {
+        if (goUp && !keysDown['ArrowUp']) {
+          if (now - lastUpTapTime <= DOUBLE_TAP_WINDOW_MS) {
+            startElevatorAutoGlide(player, world, 'up');
+            lastUpTapTime = 0;
+          } else {
+            lastUpTapTime = now;
+          }
+        }
+        if (goDown && !keysDown['ArrowDown']) {
+          if (now - lastDownTapTime <= DOUBLE_TAP_WINDOW_MS) {
+            startElevatorAutoGlide(player, world, 'down');
+            lastDownTapTime = 0;
+          } else {
+            lastDownTapTime = now;
+          }
+        }
+      }
+
+      keysDown['ArrowUp'] = goUp;
+      keysDown['KeyW'] = goUp;
+      keysDown['w'] = goUp;
+      keysDown['W'] = goUp;
+
+      keysDown['ArrowDown'] = goDown;
+      keysDown['KeyS'] = goDown;
+      keysDown['s'] = goDown;
+      keysDown['S'] = goDown;
+
+      keysDown['ArrowLeft'] = goLeft;
+      keysDown['KeyA'] = goLeft;
+      keysDown['a'] = goLeft;
+      keysDown['A'] = goLeft;
+
+      keysDown['ArrowRight'] = goRight;
+      keysDown['KeyD'] = goRight;
+      keysDown['d'] = goRight;
+      keysDown['D'] = goRight;
+    }
+  };
+
+  const resetJoystick = () => {
+    joyActiveTouchId = null;
+    clearDirectionKeys();
+    if (joyKnob) {
+      joyKnob.classList.add('returning');
+      joyKnob.style.transform = 'translate(0px, 0px)';
+    }
+  };
+
+  if (joyBase) {
+    // TouchEvent ile bağımsız identifier takibi (multi-touch emniyeti)
+    joyBase.addEventListener('touchstart', (e: TouchEvent) => {
+      e.preventDefault();
+      if (joyActiveTouchId !== null) return;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      joyActiveTouchId = touch.identifier;
+      updateJoystickPosition(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e: TouchEvent) => {
+      if (joyActiveTouchId === null) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === joyActiveTouchId) {
+          e.preventDefault();
+          updateJoystickPosition(touch.clientX, touch.clientY);
+          break;
+        }
+      }
+    }, { passive: false });
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (joyActiveTouchId === null) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === joyActiveTouchId) {
+          resetJoystick();
+          break;
+        }
+      }
+    };
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchEnd);
+
+    // Masaüstü ve fare testi için fallback
+    let isMouseDown = false;
+    joyBase.addEventListener('mousedown', (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      isMouseDown = true;
+      updateJoystickPosition(e.clientX, e.clientY);
+    });
+    window.addEventListener('mousemove', (e: MouseEvent) => {
+      if (!isMouseDown) return;
+      updateJoystickPosition(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => {
+      if (isMouseDown) {
+        isMouseDown = false;
+        resetJoystick();
+      }
+    });
+  }
+
+  // Büyük Sağ Roket (İtki) Butonu
+  const joyRocket = document.getElementById('btn-joy-rocket');
+  if (joyRocket) {
+    const startRocket = (e: Event) => {
+      e.preventDefault();
+      joyRocket.classList.add('active');
+      keysDown['ArrowUp'] = true;
+      keysDown['KeyW'] = true;
+      keysDown['w'] = true;
+      keysDown['W'] = true;
+
+      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
+      if (!isAnyModalOpen) {
+        const now = performance.now();
+        if (now - lastUpTapTime <= DOUBLE_TAP_WINDOW_MS) {
+          startElevatorAutoGlide(player, world, 'up');
+          lastUpTapTime = 0;
+        } else {
+          lastUpTapTime = now;
+        }
+      }
+    };
+
+    const stopRocket = (e: Event) => {
+      e.preventDefault();
+      joyRocket.classList.remove('active');
+      if (joyActiveTouchId === null || !keysDown['ArrowUp']) {
+        keysDown['ArrowUp'] = false;
+        keysDown['KeyW'] = false;
+        keysDown['w'] = false;
+        keysDown['W'] = false;
+      }
+    };
+
+    joyRocket.addEventListener('pointerdown', startRocket);
+    joyRocket.addEventListener('pointerup', stopRocket);
+    joyRocket.addEventListener('pointercancel', stopRocket);
+    joyRocket.addEventListener('pointerleave', stopRocket);
+  }
+
+  // Joystick Modu Ekipman Tuşları
+  const btnJoyRail = document.getElementById('btn-joy-rail');
+  if (btnJoyRail) {
+    const startJoyRail = (e: Event) => {
+      e.preventDefault();
+      btnJoyRail.classList.add('active');
+      keysDown['KeyC'] = true;
+      keysDown['c'] = true;
+      keysDown['C'] = true;
+      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
+      if (!isAnyModalOpen) {
+        useConsumableItem(player, 'elevatorRails', world);
+      }
+    };
+    const stopJoyRail = (e: Event) => {
+      e.preventDefault();
+      btnJoyRail.classList.remove('active');
+      keysDown['KeyC'] = false;
+      keysDown['c'] = false;
+      keysDown['C'] = false;
+    };
+    btnJoyRail.addEventListener('pointerdown', startJoyRail);
+    btnJoyRail.addEventListener('pointerup', stopJoyRail);
+    btnJoyRail.addEventListener('pointercancel', stopJoyRail);
+    btnJoyRail.addEventListener('pointerleave', stopJoyRail);
+  }
+
+  const btnJoyFuel = document.getElementById('btn-joy-fuel');
+  const btnJoyRepair = document.getElementById('btn-joy-repair');
+  const btnJoyDyn = document.getElementById('btn-joy-dyn');
+  const btnJoyTp = document.getElementById('btn-joy-tp');
+
+  bindConsumable(btnJoyFuel, 'fuelCanister');
+  bindConsumable(btnJoyRepair, 'repairKit');
+  bindConsumable(btnJoyDyn, 'dynamite');
+  bindConsumable(btnJoyTp, 'teleporter');
+
+  // ==========================================
+  // 3. ÇİFT MODLU (TOGGLE) KONTROL YÖNETİCİSİ
+  // ==========================================
+  const dpadLayout = document.getElementById('controls-dpad-layout');
+  const joystickLayout = document.getElementById('controls-joystick-layout');
+  const btnSwitchHud = document.getElementById('btn-switch-control-mode');
+  const btnTogglePill = document.getElementById('btn-toggle-layout-mode');
+  const modeLabel = document.getElementById('current-control-mode-label');
+  const mobileControlsContainer = document.getElementById('mobile-controls');
+
+  let currentControlMode: 'dpad' | 'joystick' = 'dpad';
+  const savedControlMode = localStorage.getItem('polyminer_control_mode');
+  if (savedControlMode === 'joystick' || savedControlMode === 'dpad') {
+    currentControlMode = savedControlMode;
+  }
+
+  const applyControlMode = (mode: 'dpad' | 'joystick', showNotification = false) => {
+    currentControlMode = mode;
+    localStorage.setItem('polyminer_control_mode', mode);
+
+    // Stuck tuş kalmaması için tüm aktif hareket bayraklarını anında sıfırla!
+    resetJoystick();
+    for (const k of Object.keys(keysDown)) {
+      keysDown[k] = false;
+    }
+    document.querySelectorAll('.touch-btn').forEach(b => b.classList.remove('active'));
+
+    if (mode === 'joystick') {
+      if (dpadLayout) dpadLayout.style.display = 'none';
+      if (joystickLayout) joystickLayout.style.display = 'flex';
+      if (btnSwitchHud) {
+        btnSwitchHud.innerText = '🕹️ Joystick';
+        btnSwitchHud.title = 'Mevcut: Sanal Joystick (Tuşlara Geçmek İçin Tıkla)';
+      }
+      if (modeLabel) modeLabel.innerText = 'Mod: Joystick ⇄ Tuşlar';
+      if (showNotification) {
+        uiManager.showToast('🕹️ Kontrol: Sanal Analog Joystick', '#38bdf8', 1800);
+      }
+    } else {
+      if (dpadLayout) dpadLayout.style.display = 'flex';
+      if (joystickLayout) joystickLayout.style.display = 'none';
+      if (btnSwitchHud) {
+        btnSwitchHud.innerText = '🕹️ Tuşlar';
+        btnSwitchHud.title = 'Mevcut: Klasik Tuşlar (Joystick\'e Geçmek İçin Tıkla)';
+      }
+      if (modeLabel) modeLabel.innerText = 'Mod: Tuşlar ⇄ Joystick';
+      if (showNotification) {
+        uiManager.showToast('🎮 Kontrol: Klasik Tuş Takımı (D-Pad)', '#10b981', 1800);
+      }
+    }
+
+    // Kullanıcı kumandayı açtıysa görünürlüğü teyit et
+    if (showNotification && mobileControlsContainer?.classList.contains('force-hide')) {
+      mobileControlsContainer.classList.remove('force-hide');
+      mobileControlsContainer.classList.add('force-show');
+      localStorage.setItem('polyminer_touch_controls', 'show');
+    }
+  };
+
+  if (btnSwitchHud) {
+    btnSwitchHud.addEventListener('click', () => {
+      applyControlMode(currentControlMode === 'dpad' ? 'joystick' : 'dpad', true);
+    });
+  }
+  if (btnTogglePill) {
+    btnTogglePill.addEventListener('click', () => {
+      applyControlMode(currentControlMode === 'dpad' ? 'joystick' : 'dpad', true);
+    });
+  }
+
+  // İlk yüklemede sessizce kaydı uygula
+  applyControlMode(currentControlMode, false);
 }
 
 setupMobileControls();
