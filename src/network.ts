@@ -40,6 +40,8 @@ export function sanitizeColor(raw: unknown, fallback: string = '#00f2fe'): strin
 export const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 export const isInt = (v: unknown): v is number => Number.isInteger(v);
+export const isValidWalletDelta = (delta: unknown): delta is number =>
+  isFiniteNum(delta) && Math.abs(delta) <= 1e7 && Math.floor(delta) !== 0;
 
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -443,16 +445,50 @@ export class NetworkManager {
         break;
       }
 
+      case 'WALLET_DELTA_REQUEST': {
+        // Only Host receives and validates delta requests from guests!
+        if (!this.isHost) break;
+        const p = packet.payload;
+        if (!p || typeof p !== 'object') break;
+        if (!isValidWalletDelta(p.changeAmount)) break;
+        const changeAmount = Math.floor(p.changeAmount);
+
+        const currentMoney = this.callbacks.getSharedMoney?.() ?? 0;
+        const newMoney = currentMoney + changeAmount;
+        // Spending is rejected if balance would go below 0
+        if (newMoney < 0 || newMoney > 1e9) break;
+
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const safeActorName = rosterEntry?.name || 'Madenci';
+        const safeReason = typeof p.reason === 'string' ? p.reason.slice(0, 40) : 'Ortak İşlem';
+
+        const validatedWallet = {
+          money: Math.floor(newMoney),
+          changeAmount,
+          reason: safeReason,
+          actorName: safeActorName
+        };
+
+        // Host updates its own local state & UI
+        this.callbacks.onSharedWalletUpdate?.(validatedWallet);
+
+        // Host broadcasts authoritative new total to ALL connected clients (including sender)
+        this.broadcast({
+          type: 'SHARED_WALLET_UPDATE',
+          payload: validatedWallet
+        });
+        break;
+      }
+
       case 'SHARED_WALLET_UPDATE': {
+        // Only guests receive SHARED_WALLET_UPDATE from the authoritative host!
+        if (this.isHost) break;
         const p = packet.payload;
         if (!p || typeof p !== 'object') break;
         if (!isFiniteNum(p.money) || p.money < 0 || p.money > 1e9) break;
         if (!isFiniteNum(p.changeAmount) || Math.abs(p.changeAmount) > 1e8) break;
 
-        const rosterEntry = this.roster.get(sourceConn.peer);
-        const safeActorName = this.isHost
-          ? (rosterEntry?.name || 'Madenci')
-          : sanitizeName(p.actorName, 'Madenci');
+        const safeActorName = sanitizeName(p.actorName, 'Madenci');
         const safeReason = typeof p.reason === 'string' ? p.reason.slice(0, 40) : 'Ortak İşlem';
 
         const validatedWallet = {
@@ -463,12 +499,6 @@ export class NetworkManager {
         };
 
         this.callbacks.onSharedWalletUpdate?.(validatedWallet);
-        if (this.isHost) {
-          this.broadcast({
-            type: 'SHARED_WALLET_UPDATE',
-            payload: validatedWallet
-          }, sourceConn.peer);
-        }
         break;
       }
 
@@ -619,19 +649,35 @@ export class NetworkManager {
   }
 
   /**
-   * Broadcast shared money balance changes (sales, upgrades, chests).
+   * Send shared money delta (sales, upgrades, repairs).
+   * Host authoritatively aggregates deltas and broadcasts the new total.
+   * Guest sends delta request to Host for authoritative validation.
    */
-  public broadcastSharedWallet(money: number, changeAmount: number, reason: string) {
+  public sendWalletDelta(changeAmount: number, reason: string) {
     if (!this.isConnected) return;
-    this.broadcast({
-      type: 'SHARED_WALLET_UPDATE',
-      payload: {
-        money,
-        changeAmount,
-        reason,
-        actorName: this.localName
-      }
-    });
+    if (!isValidWalletDelta(changeAmount)) return;
+
+    if (this.isHost) {
+      const currentMoney = this.callbacks.getSharedMoney?.() ?? 0;
+      const safeReason = typeof reason === 'string' ? reason.slice(0, 40) : 'Ortak İşlem';
+      this.broadcast({
+        type: 'SHARED_WALLET_UPDATE',
+        payload: {
+          money: Math.floor(currentMoney),
+          changeAmount: Math.floor(changeAmount),
+          reason: safeReason,
+          actorName: this.localName
+        }
+      });
+    } else {
+      this.broadcast({
+        type: 'WALLET_DELTA_REQUEST',
+        payload: {
+          changeAmount: Math.floor(changeAmount),
+          reason: typeof reason === 'string' ? reason.slice(0, 40) : 'Ortak İşlem'
+        }
+      });
+    }
   }
 
   /**

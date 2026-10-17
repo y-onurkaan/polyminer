@@ -193,8 +193,8 @@ window.addEventListener('polyminer:tile-changed', (e: any) => {
 
 window.addEventListener('polyminer:wallet-changed', (e: any) => {
   const d = e.detail;
-  if (d) {
-    network.broadcastSharedWallet(d.newMoney, d.changeAmount, d.reason);
+  if (d && typeof d.changeAmount === 'number') {
+    network.sendWalletDelta(d.changeAmount, d.reason || 'Ortak İşlem');
   }
 });
 
