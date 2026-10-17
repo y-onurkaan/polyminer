@@ -10,7 +10,9 @@ export const DEFAULT_RADAR_RADIUS = 2.5; // In tile units
 
 // Fall Damage Constants
 export const SAFE_LANDING_SPEED = 250; // px/s (1 block fall = ~240 px/s is 100% safe; damage starts after > 1 block)
-export const FALL_DAMAGE_FACTOR = 0.33; // damage per px/s above threshold (2 blocks = ~30 HP, caps at 10-block cliff)
+export const FALL_DAMAGE_FACTOR = 0.33; // damage per px/s above threshold (2 blocks = ~30 HP)
+export const DEEP_FALL_THRESHOLD_SPEED = 165; // px/s excess (speed reached after falling 3+ blocks / 144px)
+export const DEEP_FALL_PENALTY_MULTIPLIER = 1.20; // +20% damage penalty for falls from 3 blocks and deeper
 
 // Rock Mining Requirements
 export const ROCK_MIN_DRILL_LEVEL = 4;

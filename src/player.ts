@@ -7,6 +7,8 @@ import {
   DEFAULT_RADAR_RADIUS,
   SAFE_LANDING_SPEED,
   FALL_DAMAGE_FACTOR,
+  DEEP_FALL_THRESHOLD_SPEED,
+  DEEP_FALL_PENALTY_MULTIPLIER,
   CONSUMABLES,
   BASE_ELEVATOR_SPEED,
   RELIC_DEFINITIONS,
@@ -1004,7 +1006,9 @@ export function updatePlayer(
       // Fall Damage Calculation (Elevator eliminates fall damage)
       if (previousVy > SAFE_LANDING_SPEED && !player.isInElevator && !player.elevatorAuto) {
         const excessSpeed = previousVy - SAFE_LANDING_SPEED;
-        const baseDamage = Math.round(excessSpeed * FALL_DAMAGE_FACTOR);
+        // Drops from 3+ blocks (excessSpeed >= DEEP_FALL_THRESHOLD_SPEED, ~144+ px) receive an additional +20% penalty
+        const deepFallMult = excessSpeed >= DEEP_FALL_THRESHOLD_SPEED ? DEEP_FALL_PENALTY_MULTIPLIER : 1.0;
+        const baseDamage = Math.round(excessSpeed * FALL_DAMAGE_FACTOR * deepFallMult);
         const tabletMult = player.discoveredRelics?.includes('obsidian_tablet') ? 0.75 : 1.0;
         const damage = Math.round(baseDamage * getDamageReductionFactor(player.upgrades.hull) * tabletMult);
         if (damage > 0) {
