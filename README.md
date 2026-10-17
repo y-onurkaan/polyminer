@@ -22,28 +22,37 @@ Madenler düzgün çokgen olarak çizilir. **Kenar sayısı arttıkça değeri a
 
 ## Özellikler
 
-- 4 biyom: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği
-- Yakıt, gövde hasarı, düşme hasarı ve ısınma yönetimi
+- 4 biyom: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği (550m derinlik)
+- **Online Co-op (P2P WebRTC / PeerJS):** Sunucusuz, oda koduyla (`POLY-XXXX`) arkadaşlarınla birlikte madencilik yapma, ortak şirket kasası, anlık tünel/ray paylaşımı ve özelleştirilebilir Mecha Pod renkleri
+- Gerçekçi düşme hasarı: 1 blok güvenli (0 hasar), 2 blok -30 HP, 3+ blok derin düşüşlerde +%20 ceza, 10 blokta terminal uçurum tavanı
+- Yakıt, gövde hasarı, ısı ve hararet yönetimi
 - Dükkân: matkap, gövde, yakıt deposu, radyatör vb. geliştirmeler
-- Sarf malzemeleri: yedek yakıt, tamir kiti, ışınlayıcı, dinamit, asansör rayı
-- Asansör rayı ile yakıtsız ve otomatik yukarı/aşağı seyir
-- Düşen kayalar, gizli sandıklar ve fosil müzesi
-- Sis (fog of war) ve radar
-- Otomatik kayıt (`localStorage`)
-- Mobil uyumlu dokunmatik kontroller
+- Sarf malzemeleri: yedek yakıt, tamir kiti, ışınlayıcı, dinamit, asansör rayı ($25)
+- Manyetik asansör rayı ile yakıtsız, hasarsız ve otomatik yukarı/aşağı seyir
+- Düşen heyelan kayaları, gizli hazine sandıkları ve Arkeoloji Fosil Müzesi
+- Sol kenar dikey derinlik mini-radarı ve sis (fog of war)
+- Güvenli otomatik kayıt (`localStorage` - misafir modunda solo kayıt korunur)
+- Mobil uyumlu dokunmatik kontroller (D-Pad ve eylem butonları)
+
+## Online Co-op Nasıl Oynanır?
+
+1. Üst bardaki **`[ 🌐 ONLINE CO-OP ]`** butonuna tıkla.
+2. Kullanıcı adını ve Mecha Pod şasi rengini seç.
+3. **Oda Kur (Host):** Tek tıkla `POLY-XXXX` oda kodu üret ve arkadaşına gönder.
+4. **Odaya Katıl (Misafir):** Arkadaşından aldığın kodu girip bağlan.
+   * *Not:* P2P WebRTC ile tarayıcıdan tarayıcıya doğrudan iletişim kurulur. Misafir olarak oynarken solo maden kaydın korunur; odadan ayrıldığında kendi madenine hasarsız dönersin.
 
 ## Kontroller
 
 | Tuş | İşlev |
 |---|---|
 | `W` `A` `S` `D` / Ok tuşları | Hareket, roket itkisi, kazma |
-| `R` | Yedek yakıt |
-| `T` | Tamir kiti |
-| `Q` | Yüzeye ışınlan |
-| `X` | Sismik dinamit |
+| `R` | Yedek yakıt kullan |
+| `T` | Gövde tamir kiti kullan |
+| `Q` | Yüzeye acil durum ışınlanması |
+| `X` | Sismik dinamit patlat |
 | `C` | Asansör rayı döşe (basılı tut) |
-| `2x W` / `2x S` | Raydayken otomatik yukarı / aşağı (durdur: `Boşluk`) |
-| `H` | Nasıl oynanır |
+| `2x W` / `2x S` | Raydayken otomatik yukarı / aşağı seyir (durdur: `Boşluk`) |
 
 Mobilde ekrandaki yön ve eylem butonları kullanılır.
 
