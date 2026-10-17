@@ -1,5 +1,6 @@
 import { PlayerExtendedState } from './player';
-import { OreDefinition, ConsumableInventory } from './types';
+import { OreDefinition, ConsumableInventory, CHASSIS_COLORS } from './types';
+import { NetworkManager, RosterPlayer } from './network';
 import { CONSUMABLES, ORES, BIOMES, RELIC_DEFINITIONS, MUSEUM_CURATOR_REWARD } from './constants';
 import { sounds } from './audio';
 import { addFloatingText } from './effects';
@@ -167,6 +168,25 @@ export class UIManager {
   private victoryCargo: HTMLElement;
   private btnContinueGame: HTMLButtonElement;
 
+  // Co-op Modal
+  private btnOpenCoop: HTMLElement | null = null;
+  private coopModal: HTMLElement | null = null;
+  private btnCloseCoop: HTMLElement | null = null;
+  private coopNicknameInput: HTMLInputElement | null = null;
+  private coopColorSelector: HTMLElement | null = null;
+  private btnCoopCreateRoom: HTMLButtonElement | null = null;
+  private coopHostInfo: HTMLElement | null = null;
+  private coopDisplayRoomCode: HTMLElement | null = null;
+  private btnCoopCopyCode: HTMLButtonElement | null = null;
+  private coopJoinInput: HTMLInputElement | null = null;
+  private btnCoopJoinRoom: HTMLButtonElement | null = null;
+  private coopDisconnectContainer: HTMLElement | null = null;
+  private btnCoopDisconnect: HTMLButtonElement | null = null;
+  private coopStatusBadge: HTMLElement | null = null;
+  private coopRosterList: HTMLElement | null = null;
+  private isCoopVisible = false;
+  private networkManager: NetworkManager | null = null;
+
   // Modal Visibility State
   private isShopVisible = false;
   private isHelpVisible = false;
@@ -229,6 +249,23 @@ export class UIManager {
     this.victoryCargo = document.getElementById('victory-cargo') as HTMLElement;
     this.btnContinueGame = document.getElementById('btn-continue-game') as HTMLButtonElement;
 
+    // Co-op elements
+    this.btnOpenCoop = document.getElementById('btn-open-coop');
+    this.coopModal = document.getElementById('coop-modal');
+    this.btnCloseCoop = document.getElementById('btn-close-coop');
+    this.coopNicknameInput = document.getElementById('coop-nickname-input') as HTMLInputElement | null;
+    this.coopColorSelector = document.getElementById('coop-color-selector');
+    this.btnCoopCreateRoom = document.getElementById('btn-coop-create-room') as HTMLButtonElement | null;
+    this.coopHostInfo = document.getElementById('coop-host-info');
+    this.coopDisplayRoomCode = document.getElementById('coop-display-room-code');
+    this.btnCoopCopyCode = document.getElementById('btn-coop-copy-code') as HTMLButtonElement | null;
+    this.coopJoinInput = document.getElementById('coop-join-input') as HTMLInputElement | null;
+    this.btnCoopJoinRoom = document.getElementById('btn-coop-join-room') as HTMLButtonElement | null;
+    this.coopDisconnectContainer = document.getElementById('coop-disconnect-container');
+    this.btnCoopDisconnect = document.getElementById('btn-coop-disconnect') as HTMLButtonElement | null;
+    this.coopStatusBadge = document.getElementById('coop-status-badge');
+    this.coopRosterList = document.getElementById('coop-roster-list');
+
     this.renderHelpOreTable();
     this.setupListeners();
   }
@@ -259,6 +296,13 @@ export class UIManager {
 
     this.btnCloseTow.addEventListener('click', () => this.hideTowModal());
     this.btnContinueGame.addEventListener('click', () => this.hideVictory());
+
+    if (this.btnOpenCoop) {
+      this.btnOpenCoop.addEventListener('click', () => this.toggleCoop());
+    }
+    if (this.btnCloseCoop) {
+      this.btnCloseCoop.addEventListener('click', () => this.hideCoop());
+    }
 
     // Mobile Virtual Gamepad Toggle
     const btnToggleControls = document.getElementById('btn-toggle-controls');
@@ -294,14 +338,24 @@ export class UIManager {
     }
 
     window.addEventListener('keydown', (e: KeyboardEvent) => {
+      // Prevent game hotkeys if focused on text input
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') {
+        if (e.key === 'Escape') {
+          (e.target as HTMLElement).blur();
+          if (this.isCoopVisible) this.hideCoop();
+        }
+        return;
+      }
+
       if (e.key === 'h' || e.key === 'H') {
-        if (!this.isShopVisible && !this.isTowVisible && !this.isVictoryVisible) {
+        if (!this.isShopVisible && !this.isTowVisible && !this.isVictoryVisible && !this.isCoopVisible) {
           if (this.isHelpVisible) this.hideHelp();
           else this.showHelp();
         }
       }
 
       if (e.key === 'Escape') {
+        if (this.isCoopVisible) this.hideCoop();
         if (this.isShopVisible) this.hideShop();
         if (this.isHelpVisible) this.hideHelp();
         if (this.isTowVisible) this.hideTowModal();
@@ -543,6 +597,12 @@ export class UIManager {
     const bonusLabel = dinoBonus > 1 ? ` (+$${total - baseTotal} %15 Müze Bonusu)` : '';
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} SATILDI!${bonusLabel}`, '#facc15');
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+        detail: { newMoney: this.playerRef.money, changeAmount: total, reason: 'Tüm Madenleri Sat' }
+      }));
+    }
+
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
   }
@@ -564,6 +624,12 @@ export class UIManager {
 
     const bonusLabel = dinoBonus > 1 ? ` (+%15 Fosil)` : '';
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} ${oreName} (${matching.length}x) Satıldı!${bonusLabel}`, '#facc15');
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+        detail: { newMoney: this.playerRef.money, changeAmount: total, reason: `${oreName} Satışı` }
+      }));
+    }
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -615,6 +681,12 @@ export class UIManager {
     const bonusLabel = dinoBonus > 1 ? ` (+%15 Fosil)` : '';
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} SATILDI! (${toSell.length} maden satıldı, ${keptCargo.length} korundu)${bonusLabel}`, '#facc15');
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+        detail: { newMoney: this.playerRef.money, changeAmount: total, reason: 'Üretim Harici Maden Satışı' }
+      }));
+    }
+
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
   }
@@ -653,6 +725,12 @@ export class UIManager {
     this.playerRef.money -= nextTierConfig.cost;
     (this.playerRef.upgrades as any)[key] = nextTierConfig.level;
     sounds.playSellSound();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+        detail: { newMoney: this.playerRef.money, changeAmount: -nextTierConfig.cost, reason: `${config.name} Seviye ${nextTierConfig.level}` }
+      }));
+    }
 
     switch (key) {
       case 'drill':
@@ -704,6 +782,12 @@ export class UIManager {
     this.playerRef.inventory[itemKey] = (this.playerRef.inventory[itemKey] || 0) + addedAmount;
     sounds.playSellSound();
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+${addedAmount} ${item.name}`, '#4ade80');
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+        detail: { newMoney: this.playerRef.money, changeAmount: -totalCost, reason: `${item.name} x${count}` }
+      }));
+    }
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -988,6 +1072,13 @@ export class UIManager {
           player.museumRewardClaimed = true;
           sounds.playVictoryFanfare();
           addFloatingText(player.x + 19, player.y - 14, '🏆 +$15,000 MÜZE ÖDÜLÜ!', '#f59e0b');
+
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+              detail: { newMoney: player.money, changeAmount: MUSEUM_CURATOR_REWARD, reason: 'Müze Küratör Ödülü' }
+            }));
+          }
+
           if (this.onStateChange) this.onStateChange();
           this.renderShopContent();
         });
@@ -1078,7 +1169,51 @@ export class UIManager {
     this.helpOreTable.innerHTML = html;
   }
 
-  public showVictory(playTime: number, player: PlayerExtendedState) {
+  // --- TOAST NOTIFICATIONS ---
+  public showToast(message: string, color: string = '#38bdf8', durationMs: number = 3500): void {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      container.style.cssText = 'position:fixed; top:42px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:6px; z-index:99999; pointer-events:none;';
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      background: rgba(15, 23, 42, 0.94);
+      border: 1.5px solid ${color};
+      color: #f8fafc;
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: bold;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      opacity: 0;
+      transform: translateY(-8px);
+      max-width: 90vw;
+      text-align: center;
+    `;
+    toast.innerText = message;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+    });
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-8px)';
+      setTimeout(() => toast.remove(), 300);
+    }, durationMs);
+  }
+
+  // --- VICTORY MODAL ---
+  public showVictory(playTime: number, player: PlayerExtendedState, winnerName?: string) {
     this.isVictoryVisible = true;
     const mins = Math.floor(playTime / 60);
     const secs = Math.floor(playTime % 60);
@@ -1087,6 +1222,17 @@ export class UIManager {
     if (this.victoryTime) this.victoryTime.innerText = timeFormatted;
     if (this.victoryMoney) this.victoryMoney.innerText = `$${player.money.toLocaleString()}`;
     if (this.victoryCargo) this.victoryCargo.innerText = `${player.cargo.length} / ${player.maxCargo}`;
+
+    const victoryTitle = document.getElementById('victory-title');
+    const victoryDesc = document.getElementById('victory-desc');
+    if (winnerName && victoryTitle) {
+      victoryTitle.innerText = `🏆 KADİM ÇEKİRDEK [${winnerName.toUpperCase()}] ÖNCÜLÜĞÜNDE EKİP TARAFINDAN FETHEDİLDİ!`;
+      if (victoryDesc) {
+        victoryDesc.innerHTML = `550. metrenin en dibindeki devasa <strong style="color:#ec4899;">Kadim Dodecagon (12-Gen) Çekirdeği</strong> tüm co-op ekibinin ortak çalışmasıyla başarıyla çıkarıldı!`;
+      }
+    } else if (victoryTitle) {
+      victoryTitle.innerText = `TEBRİKLER! YERALTI ÇEKİRDEĞİ FETHEDİLDİ`;
+    }
 
     if (this.victoryModal) {
       this.victoryModal.style.display = 'flex';
@@ -1102,6 +1248,229 @@ export class UIManager {
 
   public isVictoryOpen(): boolean {
     return this.isVictoryVisible;
+  }
+
+  // --- CO-OP MODAL & MULTIPLAYER LOBBY ---
+  public isCoopOpen(): boolean {
+    return this.isCoopVisible;
+  }
+
+  public showCoop() {
+    this.isCoopVisible = true;
+    if (this.coopModal) this.coopModal.style.display = 'flex';
+    this.renderCoopUI();
+  }
+
+  public hideCoop() {
+    this.isCoopVisible = false;
+    if (this.coopModal) this.coopModal.style.display = 'none';
+  }
+
+  public toggleCoop() {
+    if (this.isCoopVisible) this.hideCoop();
+    else this.showCoop();
+  }
+
+  public initCoop(network: NetworkManager) {
+    this.networkManager = network;
+
+    if (this.playerRef) {
+      this.playerRef.name = network.localName;
+      this.playerRef.color = network.localColor;
+    }
+
+    // Bind nickname input
+    if (this.coopNicknameInput) {
+      this.coopNicknameInput.value = network.localName;
+      this.coopNicknameInput.addEventListener('input', () => {
+        const val = this.coopNicknameInput!.value.trim().slice(0, 16) || 'Madenci';
+        network.setProfile(val, network.localColor);
+        if (this.playerRef) this.playerRef.name = val;
+      });
+    }
+
+    // Render 5 color swatches
+    this.renderColorSwatches();
+
+    // Bind Host Room button
+    if (this.btnCoopCreateRoom) {
+      this.btnCoopCreateRoom.addEventListener('click', () => {
+        if (!this.networkManager) return;
+        this.btnCoopCreateRoom!.disabled = true;
+        this.btnCoopCreateRoom!.innerText = '⏳ Oda Oluşturuluyor...';
+
+        this.networkManager.createRoom(
+          (code) => {
+            this.btnCoopCreateRoom!.disabled = false;
+            this.btnCoopCreateRoom!.innerText = '📡 YENİ ODA KUR (HOST)';
+            if (this.coopHostInfo) this.coopHostInfo.style.display = 'block';
+            if (this.coopDisplayRoomCode) this.coopDisplayRoomCode.innerText = code;
+            if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'block';
+            this.showToast(`📡 Oda kuruldu: ${code}`, '#10b981');
+          },
+          (err) => {
+            this.btnCoopCreateRoom!.disabled = false;
+            this.btnCoopCreateRoom!.innerText = '📡 YENİ ODA KUR (HOST)';
+            this.showToast(`❌ Oda kurulamadı: ${err?.type || 'Bağlantı hatası'}`, '#ef4444');
+          }
+        );
+      });
+    }
+
+    // Bind Copy Code button
+    if (this.btnCoopCopyCode) {
+      this.btnCoopCopyCode.addEventListener('click', () => {
+        const code = this.coopDisplayRoomCode?.innerText;
+        if (code) {
+          navigator.clipboard.writeText(code).then(() => {
+            this.showToast(`📋 Oda kodu kopyalandı: ${code}`, '#34d399');
+          }).catch(() => {
+            this.showToast(`Oda Kodu: ${code}`, '#38bdf8');
+          });
+        }
+      });
+    }
+
+    // Bind Join Room button
+    if (this.btnCoopJoinRoom && this.coopJoinInput) {
+      this.btnCoopJoinRoom.addEventListener('click', () => {
+        const inputVal = this.coopJoinInput!.value.trim();
+        if (!inputVal) {
+          this.showToast('⚠️ Lütfen bir oda kodu girin!', '#f59e0b');
+          return;
+        }
+
+        this.btnCoopJoinRoom!.disabled = true;
+        this.btnCoopJoinRoom!.innerText = '⏳ Bağlanıyor...';
+
+        this.networkManager!.joinRoom(
+          inputVal,
+          () => {
+            this.btnCoopJoinRoom!.disabled = false;
+            this.btnCoopJoinRoom!.innerText = 'Bağlan';
+            if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'block';
+            if (this.coopHostInfo) this.coopHostInfo.style.display = 'none';
+            this.showToast(`🟢 Odaya bağlanıldı!`, '#10b981');
+          },
+          (err) => {
+            this.btnCoopJoinRoom!.disabled = false;
+            this.btnCoopJoinRoom!.innerText = 'Bağlan';
+            this.showToast(`❌ Odaya bağlanılamadı (${err?.type || 'Hata'})`, '#ef4444');
+          }
+        );
+      });
+    }
+
+    // Bind Disconnect button
+    if (this.btnCoopDisconnect) {
+      this.btnCoopDisconnect.addEventListener('click', () => {
+        this.networkManager?.disconnect();
+        if (this.coopHostInfo) this.coopHostInfo.style.display = 'none';
+        if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'none';
+        this.showToast('🔌 Odadan ayrıldın.', '#94a3b8');
+      });
+    }
+  }
+
+  private renderColorSwatches() {
+    if (!this.coopColorSelector || !this.networkManager) return;
+    this.coopColorSelector.innerHTML = '';
+
+    for (const color of CHASSIS_COLORS) {
+      const swatch = document.createElement('div');
+      swatch.className = `color-swatch ${this.networkManager.localColor === color.hex ? 'active' : ''}`;
+      swatch.style.backgroundColor = color.hex;
+      swatch.title = `${color.name} (${color.emoji})`;
+      swatch.innerHTML = `<span style="font-size:12px; pointer-events:none;">${color.emoji}</span>`;
+
+      swatch.addEventListener('click', () => {
+        if (!this.networkManager) return;
+        this.networkManager.setProfile(this.networkManager.localName, color.hex);
+        if (this.playerRef) this.playerRef.color = color.hex;
+
+        const all = this.coopColorSelector?.querySelectorAll('.color-swatch');
+        all?.forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        this.showToast(`🎨 Şasi Rengi: ${color.name}`, color.hex, 1800);
+      });
+
+      this.coopColorSelector.appendChild(swatch);
+    }
+  }
+
+  private renderCoopUI() {
+    if (!this.networkManager) return;
+    if (this.coopNicknameInput) {
+      this.coopNicknameInput.value = this.networkManager.localName;
+    }
+    this.renderColorSwatches();
+
+    if (this.networkManager.isConnected) {
+      if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'block';
+      if (this.networkManager.getIsHost() && this.coopHostInfo && this.networkManager.getRoomCode()) {
+        this.coopHostInfo.style.display = 'block';
+        if (this.coopDisplayRoomCode) this.coopDisplayRoomCode.innerText = `POLY-${this.networkManager.getRoomCode()}`;
+      }
+    } else {
+      if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'none';
+      if (this.coopHostInfo) this.coopHostInfo.style.display = 'none';
+    }
+  }
+
+  public updateCoopHUD(statusText: string, isConnected: boolean, peerCount: number) {
+    if (this.coopStatusBadge) {
+      this.coopStatusBadge.innerText = `Durum: ${statusText}`;
+      this.coopStatusBadge.style.color = isConnected ? '#34d399' : '#94a3b8';
+      this.coopStatusBadge.style.background = isConnected ? '#064e3b' : '#1e293b';
+      this.coopStatusBadge.style.border = isConnected ? '1px solid #10b981' : '1px solid #334155';
+    }
+
+    if (this.btnOpenCoop) {
+      if (isConnected && this.networkManager?.getRoomCode()) {
+        const code = this.networkManager.getRoomCode()!;
+        const displayCode = code.startsWith('POLY-') ? code : `POLY-${code}`;
+        this.btnOpenCoop.innerHTML = `🟢 ODA: ${displayCode} (${peerCount} Kişi)`;
+        this.btnOpenCoop.style.borderColor = '#10b981';
+        this.btnOpenCoop.style.color = '#34d399';
+        this.btnOpenCoop.style.background = 'rgba(16, 185, 129, 0.22)';
+        this.btnOpenCoop.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
+      } else {
+        this.btnOpenCoop.innerHTML = '🌐 CO-OP (Tek Kişi)';
+        this.btnOpenCoop.style.borderColor = '#06b6d4';
+        this.btnOpenCoop.style.color = '#22d3ee';
+        this.btnOpenCoop.style.background = 'rgba(6, 182, 212, 0.18)';
+        this.btnOpenCoop.style.boxShadow = 'none';
+      }
+    }
+  }
+
+  public updateCoopRoster(roster: RosterPlayer[]) {
+    if (!this.coopRosterList) return;
+    if (roster.length === 0) {
+      this.coopRosterList.innerHTML = `
+        <div style="color:#64748b; font-size:11px; text-align:center; padding:12px;">
+          Henüz bağlı oyuncu yok.
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    for (const p of roster) {
+      const isMe = this.networkManager?.localName === p.name;
+      html += `
+        <div class="roster-card" style="border-left: 3px solid ${p.color};">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="width:12px; height:12px; border-radius:50%; background:${p.color}; box-shadow:0 0 6px ${p.color};"></div>
+            <strong style="color:#f8fafc;">${p.name} ${isMe ? '(Sen)' : ''}</strong>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            ${p.isHost ? '<span style="background:#0284c7; color:#fff; font-size:9px; padding:1px 5px; border-radius:3px; font-weight:bold;">HOST</span>' : '<span style="background:#334155; color:#94a3b8; font-size:9px; padding:1px 5px; border-radius:3px;">MİSAFİR</span>'}
+          </div>
+        </div>
+      `;
+    }
+    this.coopRosterList.innerHTML = html;
   }
 
   public showTowModal(cause: 'fuel' | 'hull' | 'stuck' = 'fuel') {

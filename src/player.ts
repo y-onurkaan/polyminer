@@ -134,6 +134,11 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
       '#f59e0b'
     );
     addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 35, '#f59e0b');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+        detail: { newMoney: player.money, changeAmount: duplicateBonus, reason: `Çift Fosil (${def.name})` }
+      }));
+    }
     return;
   }
 
@@ -149,6 +154,12 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
     def.color
   );
   addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 50, def.color);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('polyminer:relic-discovered', { detail: { relicId } }));
+    window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+      detail: { newMoney: player.money, changeAmount: firstFindBonus, reason: `${def.name} Keşfi` }
+    }));
+  }
 }
 
 /**
@@ -207,6 +218,12 @@ export function deployElevatorRail(player: PlayerExtendedState, world: Tile[][])
   sounds.playElevatorDeploy();
   addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, '🔩 ASANSÖR RAYI KURULDU!', '#06b6d4');
   addShockwave(pMidGx * TILE_SIZE + TILE_SIZE / 2, pMidGy * TILE_SIZE + TILE_SIZE / 2, 28, '#06b6d4');
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
+      detail: { gx: pMidGx, gy: pMidGy, tileType: TileType.EMPTY, hasElevator: true }
+    }));
+  }
   return true;
 }
 
@@ -434,6 +451,15 @@ export function openChest(
 
   revealAdjacentTiles(world, gx, gy);
   checkAndTriggerFallingRock(world, gx, gy);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+      detail: { newMoney: player.money, changeAmount: cashReward, reason: 'Terk Edilmiş Sandık' }
+    }));
+    window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
+      detail: { gx, gy, tileType: TileType.EMPTY }
+    }));
+  }
 }
 
 /**
@@ -622,6 +648,11 @@ export function updatePlayer(
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, `-${damage} ISI HASARI!`, '#ef4444');
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 8, `+$${bonus} TERMAL KRİSTAL`, '#f59e0b');
         sounds.playSteamSizzle();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+            detail: { newMoney: player.money, changeAmount: bonus, reason: 'Termal Kristal' }
+          }));
+        }
       }
       // 4. Broken Hard Rock
       else if (targetTile!.type === TileType.ROCK) {
@@ -630,7 +661,7 @@ export function updatePlayer(
       }
       // 5. ANCIENT CORE Boss / Endgame Victory!
       else if (targetTile!.type === TileType.ANCIENT_CORE) {
-        player.money += 25000;
+        player.money += 50000;
         if (targetTile!.ore && player.cargo.length < player.maxCargo) {
           player.cargo.push(targetTile!.ore);
         }
@@ -638,7 +669,10 @@ export function updatePlayer(
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 20, '🏆 KADİM ÇEKİRDEK FETHEDİLDİ! +$50,000', '#ec4899');
         player.hasWon = true;
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('polyminer:victory', { detail: { player } }));
+          window.dispatchEvent(new CustomEvent('polyminer:victory', { detail: { winnerName: player.name || 'Madenci' } }));
+          window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+            detail: { newMoney: player.money, changeAmount: 50000, reason: 'Kadim Çekirdek Fethi' }
+          }));
         }
       }
       // 6. ANCIENT CHEST / SUPPLY VAULT
@@ -655,6 +689,12 @@ export function updatePlayer(
       targetTile!.hardness = 0;
       targetTile!.revealed = true;
       revealAdjacentTiles(world, gx, gy);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
+          detail: { gx, gy, tileType: TileType.EMPTY }
+        }));
+      }
 
       // Check if rock above is now unsupported and should fall!
       checkAndTriggerFallingRock(world, gx, gy);
@@ -1271,7 +1311,10 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
         );
         player.hasWon = true;
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('polyminer:victory', { detail: { player } }));
+          window.dispatchEvent(new CustomEvent('polyminer:victory', { detail: { winnerName: player.name || 'Madenci' } }));
+          window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+            detail: { newMoney: player.money, changeAmount: 50000, reason: 'Kadim Çekirdek Fethi' }
+          }));
         }
       }
 
@@ -1286,6 +1329,12 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
 
       revealAdjacentTiles(world, gx, gy);
       checkAndTriggerFallingRock(world, gx, gy);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
+          detail: { gx, gy, tileType: TileType.EMPTY }
+        }));
+      }
     }
   }
 

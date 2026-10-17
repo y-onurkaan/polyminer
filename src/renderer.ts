@@ -1,4 +1,4 @@
-import { Tile, TileType } from './types';
+import { Tile, TileType, RemotePlayerState } from './types';
 import { TILE_SIZE, GRID_WIDTH, GRID_HEIGHT, SURFACE_ROW, getBiomeForDepth } from './constants';
 import { PlayerExtendedState, PLAYER_WIDTH, PLAYER_HEIGHT } from './player';
 
@@ -462,7 +462,8 @@ export function renderWorld(
   cameraY: number,
   viewportWidth: number,
   viewportHeight: number,
-  player?: PlayerExtendedState
+  player?: PlayerExtendedState,
+  remotePlayers?: Map<string, RemotePlayerState>
 ): void {
   const surfaceScreenY = SURFACE_ROW * TILE_SIZE - cameraY;
   const now = performance.now();
@@ -909,7 +910,7 @@ export function renderWorld(
 
   // 4. Vertical Mini-Radar Map (24x120 Grid Mini-Map on Right Side)
   if (player) {
-    renderMiniRadar(ctx, world, player, cameraY, viewportWidth, viewportHeight);
+    renderMiniRadar(ctx, world, player, cameraY, viewportWidth, viewportHeight, remotePlayers);
   }
 }
 
@@ -922,7 +923,8 @@ function renderMiniRadar(
   player: PlayerExtendedState,
   cameraY: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  remotePlayers?: Map<string, RemotePlayerState>
 ): void {
   const radarW = 54;
   const radarH = 252;
@@ -1016,13 +1018,29 @@ function renderMiniRadar(
   ctx.lineWidth = 1;
   ctx.strokeRect(mapX - 0.5, mapY + camStartRow * scaleY, 49, (camEndRow - camStartRow) * scaleY);
 
-  // Blinking Cyan Player Dot
+  // Blinking Remote Players Dots
+  if (remotePlayers && remotePlayers.size > 0) {
+    const curTime = Date.now();
+    for (const rp of remotePlayers.values()) {
+      if (curTime - rp.lastSeen > 8000) continue;
+      const rGx = (rp.x + PLAYER_WIDTH / 2) / TILE_SIZE;
+      const rGy = (rp.y + PLAYER_HEIGHT / 2) / TILE_SIZE;
+      const rDotX = mapX + rGx * scaleX;
+      const rDotY = mapY + rGy * scaleY;
+      const seed = rp.id.charCodeAt(rp.id.length - 1) || 0;
+      const rBlink = Math.sin(now * 0.012 + seed) > 0;
+      ctx.fillStyle = rBlink ? (rp.color || '#ff7b00') : '#ffffff';
+      ctx.fillRect(rDotX - 1.5, rDotY - 1.5, 3, 3);
+    }
+  }
+
+  // Blinking Local Player Dot
   const playerGx = (player.x + PLAYER_WIDTH / 2) / TILE_SIZE;
   const playerGy = (player.y + PLAYER_HEIGHT / 2) / TILE_SIZE;
   const pDotX = mapX + playerGx * scaleX;
   const pDotY = mapY + playerGy * scaleY;
   const pBlink = Math.sin(now * 0.012) > 0;
-  ctx.fillStyle = pBlink ? '#38bdf8' : '#ffffff';
+  ctx.fillStyle = pBlink ? (player.color || '#38bdf8') : '#ffffff';
   ctx.fillRect(pDotX - 1.5, pDotY - 1.5, 3, 3);
 
   ctx.restore();
@@ -1261,7 +1279,8 @@ export function renderPlayer(
   const hullRatio = player.hull / player.maxHull;
   const isAlarmOn = hullRatio < 0.25 && (Math.floor(gameTime / 200) % 2 === 0);
   const baseGray = '#3E4A59';
-  const accentColor = isAlarmOn ? '#ff3333' : '#FFD700';
+  const customColor = player.color || '#00f2fe';
+  const accentColor = isAlarmOn ? '#ff3333' : customColor;
   const cockpitColor = isAlarmOn ? '#ff0000' : '#49A6E9';
 
   // Caterpillar Tracks (Left & Right sides)
@@ -1299,6 +1318,10 @@ export function renderPlayer(
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+
+  // Chassis Custom Color Plate
+  ctx.fillStyle = customColor;
+  ctx.fillRect(-10, -2, 20, 3);
 
   // Chassis Armor Plating & Grooves
   ctx.strokeStyle = '#2d3748';
@@ -1524,4 +1547,355 @@ export function renderPlayer(
   }
 
   ctx.restore();
+}
+
+/**
+ * Renders all remote co-op players in real time:
+ * - Subterranean headlight cone (when underground)
+ * - Direction-based chassis orientation and animated thruster flame
+ * - Caterpillar tracks with animated tread notches
+ * - Chassis body with chosen chassis color
+ * - Facing-directed rotating drill bit
+ * - Drilling progress gauge (when drilling)
+ * - Floating translucent nametag with player name and live depth: [Ahmet - 140m]
+ */
+export function renderRemotePlayers(
+  ctx: CanvasRenderingContext2D,
+  remotePlayers: Map<string, RemotePlayerState>,
+  cameraY: number
+): void {
+  if (!remotePlayers || remotePlayers.size === 0) return;
+  const gameTime = performance.now();
+  const now = Date.now();
+
+  for (const player of remotePlayers.values()) {
+    // Drop inactive players (older than 8 seconds)
+    if (now - player.lastSeen > 8000) continue;
+
+    const screenX = player.x;
+    const screenY = player.y - cameraY;
+
+    ctx.save();
+
+    // 0. Subterranean Headlight Cone (When underground)
+    if (player.y >= SURFACE_ROW * TILE_SIZE) {
+      const pcx = screenX + PLAYER_WIDTH / 2;
+      const pcy = screenY + PLAYER_HEIGHT / 2;
+      const beamLength = 155;
+
+      ctx.save();
+      if (player.facing === 'down') {
+        const originY = screenY + PLAYER_HEIGHT - 2;
+        const grad = ctx.createRadialGradient(pcx, originY, 8, pcx, originY, beamLength);
+        grad.addColorStop(0.0, 'rgba(254, 240, 138, 0.38)');
+        grad.addColorStop(0.3, 'rgba(254, 240, 138, 0.20)');
+        grad.addColorStop(0.7, 'rgba(254, 240, 138, 0.06)');
+        grad.addColorStop(1.0, 'rgba(254, 240, 138, 0.00)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(pcx - 10, originY);
+        ctx.lineTo(pcx - 72, originY + beamLength);
+        ctx.lineTo(pcx + 72, originY + beamLength);
+        ctx.lineTo(pcx + 10, originY);
+        ctx.closePath();
+        ctx.fill();
+      } else if (player.facing === 'left') {
+        const originX = screenX + 2;
+        const grad = ctx.createRadialGradient(originX, pcy, 8, originX, pcy, beamLength);
+        grad.addColorStop(0.0, 'rgba(254, 240, 138, 0.38)');
+        grad.addColorStop(0.3, 'rgba(254, 240, 138, 0.20)');
+        grad.addColorStop(0.7, 'rgba(254, 240, 138, 0.06)');
+        grad.addColorStop(1.0, 'rgba(254, 240, 138, 0.00)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(originX, pcy - 10);
+        ctx.lineTo(originX - beamLength, pcy - 68);
+        ctx.lineTo(originX - beamLength, pcy + 68);
+        ctx.lineTo(originX, pcy + 10);
+        ctx.closePath();
+        ctx.fill();
+      } else if (player.facing === 'right') {
+        const originX = screenX + PLAYER_WIDTH - 2;
+        const grad = ctx.createRadialGradient(originX, pcy, 8, originX, pcy, beamLength);
+        grad.addColorStop(0.0, 'rgba(254, 240, 138, 0.38)');
+        grad.addColorStop(0.3, 'rgba(254, 240, 138, 0.20)');
+        grad.addColorStop(0.7, 'rgba(254, 240, 138, 0.06)');
+        grad.addColorStop(1.0, 'rgba(254, 240, 138, 0.00)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(originX, pcy - 10);
+        ctx.lineTo(originX + beamLength, pcy - 68);
+        ctx.lineTo(originX + beamLength, pcy + 68);
+        ctx.lineTo(originX, pcy + 10);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#fef08a';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(
+        player.facing === 'left' ? screenX + 3 : player.facing === 'right' ? screenX + PLAYER_WIDTH - 3 : pcx,
+        player.facing === 'down' ? screenY + PLAYER_HEIGHT - 3 : pcy,
+        3,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 1. Dual VTOL Rocket Lift Exhaust Flames
+    if (player.isThrusting) {
+      const flameHeight = 14 + Math.random() * 9;
+      const thrusterPositions = [screenX + 6, screenX + PLAYER_WIDTH - 14];
+
+      for (const tx of thrusterPositions) {
+        ctx.fillStyle = '#06b6d4';
+        ctx.beginPath();
+        ctx.moveTo(tx, screenY + PLAYER_HEIGHT - 2);
+        ctx.lineTo(tx + 4, screenY + PLAYER_HEIGHT + flameHeight);
+        ctx.lineTo(tx + 8, screenY + PLAYER_HEIGHT - 2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath();
+        ctx.moveTo(tx + 1.5, screenY + PLAYER_HEIGHT - 2);
+        ctx.lineTo(tx + 4, screenY + PLAYER_HEIGHT + flameHeight * 0.7);
+        ctx.lineTo(tx + 6.5, screenY + PLAYER_HEIGHT - 2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath();
+        ctx.moveTo(tx + 2.5, screenY + PLAYER_HEIGHT - 2);
+        ctx.lineTo(tx + 4, screenY + PLAYER_HEIGHT + flameHeight * 0.4);
+        ctx.lineTo(tx + 5.5, screenY + PLAYER_HEIGHT - 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // 2. Centered & Rotated Mecha Mining Rig Vehicle
+    const centerX = screenX + PLAYER_WIDTH / 2;
+    const centerY = screenY + PLAYER_HEIGHT / 2;
+    const drillLevel = player.drillTier || 1;
+    const palette = getDrillPalette(drillLevel);
+    const customColor = player.color || '#00f2fe';
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+
+    let rotation = 0;
+    if (player.facing === 'left') {
+      rotation = Math.PI / 2;
+    } else if (player.facing === 'right') {
+      rotation = -Math.PI / 2;
+    }
+    ctx.rotate(rotation);
+
+    // Rear Engine Nozzle
+    ctx.fillStyle = '#1A1A1A';
+    ctx.fillRect(-6, -16, 12, 4);
+
+    if (player.isThrusting) {
+      const flicker = Math.sin(gameTime * 0.05) * 3;
+      ctx.beginPath();
+      ctx.moveTo(-6, -15);
+      ctx.lineTo(0, -25 - flicker);
+      ctx.lineTo(6, -15);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255, 69, 0, 0.85)';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(-3, -15);
+      ctx.lineTo(0, -20 - flicker * 0.6);
+      ctx.lineTo(3, -15);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
+      ctx.fill();
+    }
+
+    // Caterpillar Tracks
+    ctx.fillStyle = '#1e242b';
+    ctx.fillRect(-17, -13, 4, 22);
+    ctx.fillRect(13, -13, 4, 22);
+
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.2;
+    const isMoving = Math.abs(player.vx) > 5 || Math.abs(player.vy) > 5 || player.isThrusting || player.isDrilling;
+    const trackOffset = isMoving ? (gameTime * (player.isThrusting ? 0.2 : 0.08)) % 5 : 0;
+    for (let ty = -12; ty < 8; ty += 5) {
+      const curY = ty + trackOffset;
+      ctx.beginPath();
+      ctx.moveTo(-17, curY);
+      ctx.lineTo(-13, curY);
+      ctx.moveTo(13, curY);
+      ctx.lineTo(17, curY);
+      ctx.stroke();
+    }
+
+    // Main Armored Tank Chassis
+    ctx.fillStyle = '#3E4A59';
+    ctx.strokeStyle = player.isDrilling ? '#f59e0b' : '#1F2937';
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    ctx.moveTo(-13, -12);
+    ctx.lineTo(13, -12);
+    ctx.lineTo(13, 3);
+    ctx.lineTo(7, 10);
+    ctx.lineTo(-7, 10);
+    ctx.lineTo(-13, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Chassis Accent Stripe with chosen Pod Color
+    ctx.fillStyle = customColor;
+    ctx.fillRect(-10, -2, 20, 3);
+
+    // Chassis Armor Plating & Grooves
+    ctx.strokeStyle = '#2d3748';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-12, -2);
+    ctx.lineTo(12, -2);
+    ctx.moveTo(-7, 5);
+    ctx.lineTo(7, 5);
+    ctx.stroke();
+
+    // Cockpit Visor
+    ctx.fillStyle = '#49A6E9';
+    ctx.beginPath();
+    ctx.moveTo(-5, -6);
+    ctx.lineTo(5, -6);
+    ctx.lineTo(7, 1);
+    ctx.lineTo(-7, 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Visor reflection shine
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath();
+    ctx.moveTo(-3, -4);
+    ctx.lineTo(4, 0);
+    ctx.stroke();
+
+    // Headlights
+    ctx.fillStyle = customColor;
+    ctx.beginPath();
+    ctx.arc(-9, 5, 1.8, 0, Math.PI * 2);
+    ctx.arc(9, 5, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dynamic Drill Bit
+    ctx.save();
+    let drillShakeX = 0;
+    let drillShakeY = 0;
+    if (player.isDrilling) {
+      drillShakeX = (Math.random() - 0.5) * 1.5;
+      drillShakeY = Math.sin(gameTime * 0.1) * 1.2;
+    }
+    ctx.translate(drillShakeX, 10 + drillShakeY);
+
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(-6, 0, 12, 3);
+
+    if (palette.aura) {
+      ctx.shadowColor = palette.aura;
+      ctx.shadowBlur = 8;
+    }
+
+    ctx.fillStyle = palette.base;
+    ctx.strokeStyle = palette.stroke;
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.moveTo(-5, 3);
+    ctx.lineTo(0, 15);
+    ctx.lineTo(5, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    const animOffset = player.isDrilling ? (gameTime * 0.04) % 6 : 0;
+    ctx.strokeStyle = palette.groove;
+    ctx.lineWidth = 1.4;
+    for (let i = 4; i < 12; i += 3) {
+      const yPos = i + animOffset;
+      if (yPos < 14) {
+        const ratio = (15 - yPos) / 12;
+        const width = 5 * ratio;
+        ctx.beginPath();
+        ctx.moveTo(-width, yPos);
+        ctx.lineTo(width, yPos + 1);
+        ctx.stroke();
+      }
+    }
+
+    ctx.fillStyle = palette.tipGlint;
+    ctx.beginPath();
+    ctx.arc(0, 14, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+    ctx.restore(); // Restore vehicle translation & rotation
+
+    // 3. Drilling Progress Bar (If drilling)
+    if (player.isDrilling) {
+      const barWidth = PLAYER_WIDTH + 6;
+      const barHeight = 4;
+      const barX = screenX - 3;
+      const barY = screenY - 9;
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+
+      ctx.fillStyle = customColor;
+      ctx.fillRect(barX, barY, barWidth * Math.min(1, player.drillProgress), barHeight);
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
+    }
+
+    // 4. FLOATING NAMETAG PILL [Name · Depth]
+    const depthMeters = Math.max(0, Math.floor(((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE - SURFACE_ROW) * 2));
+    const labelText = `${player.name || 'Madenci'} - ${depthMeters}m`;
+
+    ctx.save();
+    ctx.font = 'bold 9px monospace';
+    const textWidth = ctx.measureText(labelText).width;
+    const pillPaddingX = 6;
+    const pillW = textWidth + pillPaddingX * 2;
+    const pillH = 14;
+    const pillX = centerX - pillW / 2;
+    const pillY = screenY - (player.isDrilling ? 24 : 16);
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.strokeStyle = customColor;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(pillX, pillY, pillW, pillH, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(labelText, centerX, pillY + pillH / 2);
+    ctx.restore();
+
+    ctx.restore();
+  }
 }

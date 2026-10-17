@@ -41,28 +41,35 @@ export interface SaveData {
 }
 
 /**
+ * Serializes the world grid into a compact format.
+ */
+export function serializeWorld(world: Tile[][]): SavedTile[][] {
+  return world.map(row =>
+    row.map(tile => {
+      const item: SavedTile = {
+        t: tile.type,
+        r: tile.revealed ? 1 : 0
+      };
+      if (tile.ore) {
+        item.o = tile.ore.id.toUpperCase();
+      }
+      if (tile.hasElevator) {
+        item.e = 1;
+      }
+      if (tile.relicId) {
+        item.m = tile.relicId;
+      }
+      return item;
+    })
+  );
+}
+
+/**
  * Serializes and saves current game state to localStorage.
  */
 export function saveGame(player: PlayerExtendedState, world: Tile[][], playTime: number): boolean {
   try {
-    const compactGrid: SavedTile[][] = world.map(row =>
-      row.map(tile => {
-        const item: SavedTile = {
-          t: tile.type,
-          r: tile.revealed ? 1 : 0
-        };
-        if (tile.ore) {
-          item.o = tile.ore.id.toUpperCase();
-        }
-        if (tile.hasElevator) {
-          item.e = 1;
-        }
-        if (tile.relicId) {
-          item.m = tile.relicId;
-        }
-        return item;
-      })
-    );
+    const compactGrid = serializeWorld(world);
 
     const saveData: SaveData = {
       version: 1,
@@ -190,8 +197,15 @@ export function applyLoadedGame(
   }
 
   // 2. Restore Grid State
-  for (let y = 0; y < saveData.grid.length && y < world.length; y++) {
-    const savedRow = saveData.grid[y];
+  applySavedGrid(saveData.grid, world);
+}
+
+/**
+ * Applies a compact saved grid onto the live world grid.
+ */
+export function applySavedGrid(savedGrid: SavedTile[][], world: Tile[][]): void {
+  for (let y = 0; y < savedGrid.length && y < world.length; y++) {
+    const savedRow = savedGrid[y];
     const worldRow = world[y];
     for (let x = 0; x < savedRow.length && x < worldRow.length; x++) {
       const savedTile = savedRow[x];

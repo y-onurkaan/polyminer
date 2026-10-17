@@ -1,6 +1,6 @@
 import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, SURFACE_ROW } from './constants';
-import { generateWorld } from './world';
-import { renderWorld, renderPlayer } from './renderer';
+import { generateWorld, revealAdjacentTiles } from './world';
+import { renderWorld, renderPlayer, renderRemotePlayers } from './renderer';
 import {
   createPlayer,
   updatePlayer,
@@ -12,8 +12,11 @@ import {
 } from './player';
 import { UIManager } from './ui';
 import { updateEffects, renderEffects, addFloatingText } from './effects';
-import { saveGame, loadGame, applyLoadedGame, resetSave } from './save';
+import { saveGame, loadGame, applyLoadedGame, resetSave, serializeWorld, applySavedGrid } from './save';
 import { updateBoulders, renderBoulders } from './boulders';
+import { NetworkManager } from './network';
+import { RemotePlayerState, TileType } from './types';
+import { sounds } from './audio';
 
 // Canvas Setup
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -29,6 +32,9 @@ canvas.height = CANVAS_HEIGHT;
 // World & Player State
 const world = generateWorld();
 const player = createPlayer();
+
+// Remote Players State (Online Co-op)
+const remotePlayers: Map<string, RemotePlayerState> = new Map();
 
 // Playtime & Autosave
 let playTime = 0;
@@ -56,9 +62,118 @@ uiManager.setPlayerRef(player, () => {
   saveGame(player, world, playTime);
 });
 
-// Victory Event Listener (When 120m Ancient Core is mined/blasted)
-window.addEventListener('polyminer:victory', () => {
-  uiManager.showVictory(playTime, player);
+// Network Manager (P2P WebRTC)
+const network = new NetworkManager({
+  getGridSyncData: () => serializeWorld(world),
+  getSharedMoney: () => player.money,
+  getDiscoveredRelics: () => player.discoveredRelics || [],
+  onWelcomeSync: (data) => {
+    if (data.grid) {
+      applySavedGrid(data.grid, world);
+    }
+    if (typeof data.sharedMoney === 'number') {
+      player.money = data.sharedMoney;
+    }
+    if (Array.isArray(data.discoveredRelics)) {
+      player.discoveredRelics = [...data.discoveredRelics];
+    }
+    uiManager.showToast('🗺️ Host Haritası & Ortak Kasa Eşitlendi!', '#10b981');
+  },
+  onRemotePlayerUpdate: (rp) => {
+    remotePlayers.set(rp.id, rp);
+  },
+  onRemotePlayerLeave: (id) => {
+    const left = remotePlayers.get(id);
+    remotePlayers.delete(id);
+    if (left) {
+      uiManager.showToast(`👋 ${left.name} odadan ayrıldı.`, '#94a3b8');
+    }
+  },
+  onTileUpdate: (data) => {
+    if (data.gy >= 0 && data.gy < world.length && data.gx >= 0 && data.gx < GRID_WIDTH) {
+      const tile = world[data.gy][data.gx];
+      if (data.hasElevator) {
+        tile.hasElevator = true;
+        tile.type = TileType.EMPTY;
+        tile.revealed = true;
+        delete tile.ore;
+        tile.hardness = 0;
+        revealAdjacentTiles(world, data.gx, data.gy);
+      } else if (data.tileType === TileType.EMPTY) {
+        tile.type = TileType.EMPTY;
+        delete tile.ore;
+        tile.hardness = 0;
+        tile.revealed = true;
+        revealAdjacentTiles(world, data.gx, data.gy);
+      }
+    }
+  },
+  onSharedWalletUpdate: (data) => {
+    player.money = data.money;
+    const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
+    uiManager.updateHUD(player, depthMeters, false);
+
+    if (data.actorName !== network.localName) {
+      const isGain = data.changeAmount > 0;
+      const msg = isGain
+        ? `🤝 [${data.actorName}] +$${data.changeAmount.toLocaleString()} kazandı! (${data.reason})`
+        : `💸 [${data.actorName}] ${data.reason} aldı (-$${Math.abs(data.changeAmount).toLocaleString()})`;
+      uiManager.showToast(msg, isGain ? '#10b981' : '#f59e0b');
+    }
+  },
+  onSharedRelicUpdate: (data) => {
+    if (!player.discoveredRelics) player.discoveredRelics = [];
+    if (!player.discoveredRelics.includes(data.relicId)) {
+      player.discoveredRelics.push(data.relicId);
+      if (data.actorName !== network.localName) {
+        uiManager.showToast(`🏛️ [${data.actorName}] yeni bir kadim fosil keşfetti!`, '#f59e0b');
+        sounds.playRelicFound();
+      }
+    }
+  },
+  onVictory: (data) => {
+    sounds.playVictoryFanfare();
+    uiManager.showVictory(playTime, player, data.winnerName);
+  },
+  onStatusChange: (statusText, isConnected, peerCount) => {
+    uiManager.updateCoopHUD(statusText, isConnected, peerCount);
+  },
+  onRosterUpdate: (roster) => {
+    uiManager.updateCoopRoster(roster);
+  }
+});
+
+// Initialize Co-op Lobby in UI
+uiManager.initCoop(network);
+
+// Listen to Custom Game Events & Broadcast Over Network
+window.addEventListener('polyminer:tile-changed', (e: any) => {
+  const d = e.detail;
+  if (d) {
+    network.broadcastTileUpdate(d.gx, d.gy, d.tileType, d.hasElevator);
+  }
+});
+
+window.addEventListener('polyminer:wallet-changed', (e: any) => {
+  const d = e.detail;
+  if (d) {
+    network.broadcastSharedWallet(d.newMoney, d.changeAmount, d.reason);
+  }
+});
+
+window.addEventListener('polyminer:relic-discovered', (e: any) => {
+  const d = e.detail;
+  if (d && d.relicId) {
+    network.broadcastRelicDiscovered(d.relicId);
+  }
+});
+
+// Victory Event Listener (When 550m Ancient Core is mined/blasted)
+window.addEventListener('polyminer:victory', (e: any) => {
+  const winner = e.detail?.winnerName || player.name || network.localName || 'Madenci';
+  network.broadcastVictory(winner);
+  uiManager.showVictory(playTime, player, winner);
   saveGame(player, world, playTime);
 });
 
@@ -98,6 +213,10 @@ let lastDownTapTime = 0;
 const DOUBLE_TAP_WINDOW_MS = 380;
 
 window.addEventListener('keydown', (e: KeyboardEvent) => {
+  if ((e.target as HTMLElement)?.tagName === 'INPUT') {
+    return;
+  }
+
   keysDown[e.code] = true;
   keysDown[e.key] = true;
   keysDown[e.key.toLowerCase()] = true;
@@ -107,7 +226,7 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
   }
 
   // Quick consumable triggers and elevator double-tap when not in modal
-  const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen();
+  const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
   if (!isAnyModalOpen) {
     if (!e.repeat) {
       const now = performance.now();
@@ -146,6 +265,9 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
 });
 
 window.addEventListener('keyup', (e: KeyboardEvent) => {
+  if ((e.target as HTMLElement)?.tagName === 'INPUT') {
+    return;
+  }
   keysDown[e.code] = false;
   keysDown[e.key] = false;
   keysDown[e.key.toLowerCase()] = false;
@@ -407,7 +529,7 @@ function gameLoop(now: number) {
     }
   }
 
-  const isModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen();
+  const isModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
 
   // Periodic 5-Second Autosave
   playTime += deltaTime;
@@ -433,9 +555,23 @@ function gameLoop(now: number) {
   // 3. Camera Tracking
   updateCamera();
 
-  // 4. Rendering (World, Dynamic Boulders, Player, then Floating Texts & Shockwaves)
-  renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player);
+  // Broadcast local player state at 20 Hz
+  network.broadcastPlayerState({
+    x: player.x,
+    y: player.y,
+    vx: player.vx,
+    vy: player.vy,
+    facing: player.facing,
+    isDrilling: player.isDrilling,
+    drillProgress: player.drillProgress,
+    isThrusting: player.isThrusting,
+    drillTier: player.upgrades.drill || 1
+  });
+
+  // 4. Rendering (World, Dynamic Boulders, Remote Players, Local Player, then Floating Texts & Shockwaves)
+  renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player, remotePlayers);
   renderBoulders(ctx, cameraY);
+  renderRemotePlayers(ctx, remotePlayers, cameraY);
   renderPlayer(ctx, player, cameraY);
   renderEffects(ctx, cameraY);
 

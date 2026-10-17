@@ -110,5 +110,38 @@ export interface PlayerState {
   hasWon?: boolean;
   discoveredRelics: string[];
   museumRewardClaimed?: boolean;
+  name?: string;
+  color?: string;
+}
+
+export interface ChassisColor {
+  id: string;
+  name: string;
+  hex: string;
+  emoji: string;
+}
+
+export const CHASSIS_COLORS: ChassisColor[] = [
+  { id: 'cyan', name: 'Siyan', hex: '#00f2fe', emoji: '🩵' },
+  { id: 'orange', name: 'Turuncu', hex: '#ff7b00', emoji: '🧡' },
+  { id: 'green', name: 'Neon Yeşil', hex: '#10b981', emoji: '💚' },
+  { id: 'purple', name: 'Kozmik Mor', hex: '#a855f7', emoji: '💜' },
+  { id: 'red', name: 'Kızıl', hex: '#ef4444', emoji: '❤️' }
+];
+
+export interface RemotePlayerState {
+  id: string;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  facing: 'left' | 'right' | 'down' | 'up';
+  isDrilling: boolean;
+  drillProgress: number;
+  isThrusting: boolean;
+  drillTier: number;
+  lastSeen: number;
 }
 
