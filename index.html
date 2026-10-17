@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>POLYMINER - 2D Minimalist Motherload</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+      html, body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+        touch-action: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      body {
+        background-color: #09090b;
+        color: #f4f4f5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 100vh;
+        min-height: 100dvh;
+        padding: 0;
+      }
+      #app {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        max-width: 1152px;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+      }
+
+      /* TOP MINIMALIST HUD */
+      #top-hud {
+        width: 100%;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid #334155;
+        border-bottom: none;
+        border-top-left-radius: 4px;
+        border-top-right-radius: 4px;
+        padding: 6px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: monospace;
+        font-size: 11.5px;
+        backdrop-filter: blur(8px);
+        user-select: none;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        white-space: nowrap;
+        scrollbar-width: thin;
+        scrollbar-color: #475569 transparent;
+        box-sizing: border-box;
+      }
+      #top-hud::-webkit-scrollbar {
+        height: 4px;
+      }
+      #top-hud::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.6);
+      }
+      #top-hud::-webkit-scrollbar-thumb {
+        background: #475569;
+        border-radius: 4px;
+      }
+      #top-hud::-webkit-scrollbar-thumb:hover {
+        background: #38bdf8;
+      }
+      .hud-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .hud-label {
+        color: #94a3b8;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .hud-value {
+        font-weight: bold;
+        color: #f8fafc;
+      }
+      .gauge-box {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        width: 95px;
+        min-width: 95px;
+        flex-shrink: 0;
+      }
+      .gauge-box > div:first-child {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        overflow: hidden;
+        white-space: nowrap;
+      }
+      .gauge-bar-track {
+        height: 6px;
+        background: #1e293b;
+        border-radius: 2px;
+        overflow: hidden;
+        border: 1px solid #475569;
+      }
+      #top-hull-fill {
+        height: 100%;
+        width: 100%;
+        background: #22c55e;
+        transition: width 0.1s linear, background-color 0.25s ease;
+      }
+      #top-fuel-fill {
+        height: 100%;
+        width: 100%;
+        background: #38bdf8;
+        transition: width 0.1s linear, background-color 0.25s ease;
+      }
+      .hud-badge {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #1e293b;
+        border: 1px solid #334155;
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-family: monospace;
+        cursor: default;
+        user-select: none;
+        line-height: 1.1;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .hud-badge:hover {
+        border-color: #64748b;
+        background: #243248;
+      }
+      .hud-badge-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        font-size: 10px;
+        font-weight: bold;
+      }
+      .hud-badge-sub {
+        font-size: 7.5px;
+        color: #94a3b8;
+        letter-spacing: 0.3px;
+        margin-top: 1px;
+        white-space: nowrap;
+        font-weight: 600;
+      }
+      .btn-icon {
+        background: #1e293b;
+        border: 1px solid #475569;
+        color: #f8fafc;
+        padding: 3px 7px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: monospace;
+        transition: background 0.15s ease, border-color 0.15s ease;
+        flex-shrink: 0;
+      }
+      .btn-icon:hover {
+        background: #334155;
+        border-color: #64748b;
+      }
+      #station-status {
+        display: none;
+        font-size: 10px;
+        animation: pulse 1s infinite alternate;
+      }
+      @keyframes pulse {
+        0% { opacity: 0.6; }
+        100% { opacity: 1; }
+      }
+
+      /* CANVAS */
+      #game-canvas {
+        background: #000;
+        border: 1px solid #334155;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.85);
+        image-rendering: pixelated;
+        border-bottom-left-radius: 4px;
+        border-bottom-right-radius: 4px;
+        width: 100%;
+        max-width: 100vw;
+        height: auto;
+        flex-shrink: 1;
+        object-fit: contain;
+        touch-action: none;
+      }
+
+      /* MODAL BACKDROP */
+      .modal-backdrop {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.78);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        backdrop-filter: blur(4px);
+      }
+
+      /* MODAL BOX */
+      .modal-box {
+        background: #0f172a;
+        border: 1px solid #475569;
+        border-radius: 6px;
+        width: 800px;
+        max-width: 95%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+        display: flex;
+        flex-direction: column;
+      }
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 18px;
+        border-bottom: 1px solid #334155;
+        background: #1e293b;
+      }
+      .modal-header h2 {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        color: #f8fafc;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .btn-close {
+        background: none;
+        border: 1px solid #475569;
+        color: #94a3b8;
+        font-size: 13px;
+        padding: 4px 10px;
+        cursor: pointer;
+        border-radius: 4px;
+        font-family: monospace;
+      }
+      .btn-close:hover {
+        background: #334155;
+        color: #fff;
+      }
+
+      .modal-content {
+        padding: 16px 18px;
+        display: grid;
+        grid-template-columns: 1fr 1.25fr;
+        gap: 16px;
+      }
+
+      .shop-section {
+        background: #131b2e;
+        border: 1px solid #1e293b;
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+      }
+      .section-title {
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+        color: #94a3b8;
+        margin-bottom: 8px;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 4px;
+      }
+
+      /* ORE LIST */
+      #shop-ore-list {
+        flex: 1;
+        overflow-y: auto;
+        max-height: 250px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .ore-row {
+        background: #1e293b;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .ore-pill {
+        color: #000;
+        font-weight: bold;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+
+      .btn-primary {
+        background: #16a34a;
+        color: #fff;
+        border: none;
+        padding: 10px 14px;
+        font-size: 12px;
+        font-weight: bold;
+        font-family: monospace;
+        cursor: pointer;
+        border-radius: 4px;
+        margin-top: 10px;
+        width: 100%;
+        transition: background 0.15s ease;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: #22c55e;
+      }
+      .btn-primary:disabled {
+        background: #334155;
+        color: #64748b;
+        cursor: not-allowed;
+      }
+
+      /* UPGRADES & CONSUMABLES */
+      #upgrades-container {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 280px;
+        overflow-y: auto;
+      }
+      .upgrade-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 4px;
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .upgrade-card.maxed {
+        border-color: #facc15;
+      }
+      .level-badge {
+        font-size: 9px;
+        background: #0f172a;
+        padding: 2px 5px;
+        border-radius: 3px;
+        color: #38bdf8;
+        border: 1px solid #334155;
+        margin-left: 4px;
+      }
+      .stat-comparison {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: #94a3b8;
+        border-top: 1px solid #334155;
+        padding-top: 3px;
+      }
+      .consumable-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 4px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .btn-upgrade {
+        background: #334155;
+        color: #94a3b8;
+        border: 1px solid #475569;
+        font-size: 10px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-weight: bold;
+        cursor: not-allowed;
+        font-family: monospace;
+      }
+      .btn-upgrade.can-buy {
+        background: #2563eb;
+        color: #fff;
+        border-color: #3b82f6;
+        cursor: pointer;
+      }
+      /* MUSEUM & RELICS */
+      .relic-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 4px;
+        padding: 5px 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+      .relic-card.unlocked {
+        border-color: #f59e0b;
+        background: rgba(245, 158, 11, 0.08);
+      }
+      .relic-card.locked {
+        opacity: 0.5;
+        border-style: dashed;
+      }
+      .relic-icon {
+        font-size: 15px;
+        width: 22px;
+        text-align: center;
+      }
+      .relic-info {
+        flex: 1;
+        font-size: 10px;
+        line-height: 1.3;
+      }
+      .relic-buff {
+        font-size: 10px;
+        font-weight: bold;
+        color: #4ade80;
+      }
+
+      /* HELP TABLE */
+      .help-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      .help-table th, .help-table td {
+        padding: 5px 8px;
+        text-align: left;
+        border-bottom: 1px solid #1e293b;
+      }
+      .help-table th {
+        color: #94a3b8;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 10px;
+      }
+
+      /* MOBILE VIRTUAL GAMEPAD OVERLAY */
+      #mobile-controls {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 8px 12px max(12px, env(safe-area-inset-bottom)) 12px;
+        pointer-events: none;
+        z-index: 50;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #mobile-controls.force-hide {
+        display: none !important;
+      }
+      #mobile-controls.force-show {
+        display: flex !important;
+      }
+
+      .touch-btn {
+        pointer-events: auto;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1.5px solid rgba(71, 85, 105, 0.8);
+        color: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        transition: transform 0.08s ease, background-color 0.08s ease, border-color 0.08s ease;
+        position: relative;
+        cursor: pointer;
+      }
+      .touch-btn:active, .touch-btn.active {
+        transform: scale(0.92);
+        background: rgba(30, 41, 59, 0.98);
+        border-color: #38bdf8;
+        box-shadow: 0 0 16px rgba(56, 189, 248, 0.6);
+      }
+
+      /* D-PAD */
+      #touch-dpad {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+      }
+      .dpad-horizontal-row {
+        display: flex;
+        gap: 6px;
+      }
+      .dpad-btn {
+        width: 52px;
+        height: 52px;
+        border-radius: 12px;
+        font-size: 20px;
+      }
+      #btn-touch-up {
+        border-color: rgba(56, 189, 248, 0.6);
+        background: rgba(14, 116, 144, 0.4);
+      }
+      #btn-touch-up:active, #btn-touch-up.active {
+        background: rgba(14, 116, 144, 0.9);
+        border-color: #22d3ee;
+      }
+
+      /* ACTIONS */
+      #touch-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      .touch-action-row {
+        display: flex;
+        gap: 6px;
+      }
+      .action-btn {
+        width: 46px;
+        height: 46px;
+        border-radius: 10px;
+        font-size: 18px;
+      }
+      .rail-btn {
+        width: 54px;
+        border-color: rgba(6, 182, 212, 0.7);
+        background: rgba(6, 182, 212, 0.3);
+      }
+      .rail-btn:active, .rail-btn.active {
+        background: rgba(6, 182, 212, 0.85);
+        border-color: #06b6d4;
+      }
+      .touch-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: #0284c7;
+        color: #fff;
+        font-size: 9px;
+        font-weight: bold;
+        font-family: monospace;
+        border-radius: 8px;
+        padding: 1px 4px;
+        border: 1px solid #38bdf8;
+        min-width: 14px;
+        text-align: center;
+      }
+
+      /* MEDIA QUERIES */
+      @media (min-width: 901px) and (hover: hover) {
+        #mobile-controls:not(.force-show) {
+          display: none;
+        }
+      }
+
+      @media (max-width: 900px) {
+        #top-hud {
+          padding: 5px 8px;
+          gap: 6px;
+        }
+        .gauge-box {
+          width: 70px;
+        }
+        #top-hud .hud-badge {
+          display: none;
+        }
+      }
+
+      @media (max-width: 600px) {
+        #top-hud {
+          font-size: 11px;
+          padding: 4px 6px;
+          gap: 4px;
+        }
+        .hud-item {
+          gap: 3px;
+        }
+        .gauge-box {
+          width: 58px;
+        }
+        .gauge-bar-track {
+          height: 5px;
+        }
+        .hud-label {
+          font-size: 9px;
+        }
+        .hud-value {
+          font-size: 10px;
+        }
+        .btn-icon {
+          padding: 3px 6px;
+          font-size: 11px;
+        }
+        .dpad-btn {
+          width: 44px;
+          height: 44px;
+          font-size: 17px;
+          border-radius: 10px;
+        }
+        .action-btn {
+          width: 40px;
+          height: 40px;
+          font-size: 15px;
+        }
+        .rail-btn {
+          width: 46px;
+          height: 40px;
+        }
+        .modal-content {
+          grid-template-columns: 1fr !important;
+          gap: 12px;
+          padding: 10px;
+        }
+        .modal-box {
+          width: 96% !important;
+          max-height: 94vh !important;
+          max-height: 94dvh !important;
+        }
+        .modal-header {
+          padding: 8px 12px;
+        }
+        .modal-header h2 {
+          font-size: 11.5px;
+        }
+        #shop-ore-list {
+          max-height: 160px;
+        }
+        #upgrades-container {
+          max-height: 200px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <!-- TOP MINIMALIST HUD -->
+      <div id="top-hud">
+        <!-- Logo & Depth -->
+        <div class="hud-item">
+          <span style="color:#38bdf8; font-weight:bold; letter-spacing:1px;">POLYMINER</span>
+          <span class="hud-label" style="margin-left:4px;">Derinlik:</span>
+          <span id="top-depth" class="hud-value">0m</span>
+        </div>
+
+        <!-- Hull Gauge -->
+        <div class="hud-item">
+          <div class="gauge-box">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="hud-label">🛡️ Gövde</span>
+              <span id="top-hull-text" style="font-size:10px; font-weight:bold; color:#cbd5e1;">100%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="top-hull-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fuel Gauge -->
+        <div class="hud-item">
+          <div class="gauge-box">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="hud-label">⛽ Yakıt</span>
+              <span id="top-fuel-text" style="font-size:10px; font-weight:bold; color:#cbd5e1;">100%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="top-fuel-fill"></div>
+            </div>
+          </div>
+          <span id="station-status"></span>
+        </div>
+
+        <!-- Temperature / Hararet Gauge -->
+        <div class="hud-item">
+          <div class="gauge-box">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="hud-label">🌡️ Hararet</span>
+              <span id="top-temp-text" style="font-size:10px; font-weight:bold; color:#06b6d4;">%0</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="top-temp-fill" style="width:0%; height:100%; background:#06b6d4; transition: width 0.12s linear, background-color 0.25s ease;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cargo & Money -->
+        <div class="hud-item">
+          <span class="hud-label">📦 Kargo:</span>
+          <span id="top-cargo" class="hud-value">0 / 10</span>
+        </div>
+
+        <div class="hud-item">
+          <span id="top-money-label" class="hud-label">💰 BAKİYE:</span>
+          <span id="top-money" class="hud-value" style="color:#facc15;">$0</span>
+        </div>
+
+        <!-- Consumables & Museum Badges -->
+        <div class="hud-item" style="gap:4px;">
+          <span id="badge-fuel" class="hud-badge" title="Yedek Yakıt [R] (Acil durumda yakıt ekler)">
+            <span class="hud-badge-icon">⛽ 0</span>
+            <span class="hud-badge-sub">Yakıt [R]</span>
+          </span>
+          <span id="badge-repair" class="hud-badge" title="Tamir Kiti [T] (Gövdeyi 50 HP onarır)">
+            <span class="hud-badge-icon">🔧 0</span>
+            <span class="hud-badge-sub">Tamir [T]</span>
+          </span>
+          <span id="badge-teleport" class="hud-badge" title="Yüzeye Işınlayıcı [Q] (Acil yüzeye ışınlanma)">
+            <span class="hud-badge-icon">🌀 0</span>
+            <span class="hud-badge-sub">Işınla [Q]</span>
+          </span>
+          <span id="badge-dynamite" class="hud-badge" title="Sismik Dinamit [X] (Çevredeki kayaları patlatır)">
+            <span class="hud-badge-icon">💣 0</span>
+            <span class="hud-badge-sub">Dinamit [X]</span>
+          </span>
+          <span id="badge-rail" class="hud-badge" title="Asansör Rayı [C] (Dikey asansör hattı döşer)">
+            <span class="hud-badge-icon">🏗️ 0</span>
+            <span class="hud-badge-sub">Asansör [C]</span>
+          </span>
+          <span id="badge-museum" class="hud-badge" style="color:#f59e0b;" title="Arkeoloji Müzesi & Fosiller (Toplanan eserler)">
+            <span class="hud-badge-icon">🏛️ 0/6</span>
+            <span class="hud-badge-sub">Fosil</span>
+          </span>
+        </div>
+
+        <!-- Sound, Help, Reset & Gamepad Actions -->
+        <div class="hud-item" style="gap:4px;">
+          <button id="btn-toggle-controls" class="btn-icon" title="Dokunmatik Kumandaları Aç/Kapat">🎮</button>
+          <button id="btn-toggle-sound" class="btn-icon" title="Sesi Aç/Kapat">🔊</button>
+          <button id="btn-open-help" class="btn-icon" title="Nasıl Oynanır? [H]">[ ? ]</button>
+          <button id="btn-reset-game" class="btn-icon" title="Kaydı Sıfırla / Yeni Oyun" style="color:#f87171;">[ ↺ ]</button>
+        </div>
+      </div>
+
+      <!-- MAIN CANVAS -->
+      <canvas id="game-canvas"></canvas>
+
+      <!-- MOBILE VIRTUAL GAMEPAD OVERLAY -->
+      <div id="mobile-controls">
+        <!-- LEFT: DIRECTION & THRUST CLUSTER (D-PAD) -->
+        <div id="touch-dpad">
+          <button class="touch-btn dpad-btn" id="btn-touch-up" data-key="ArrowUp" aria-label="Yukarı / Roket İtki">
+            <span class="btn-glyph">🚀</span>
+          </button>
+          <div class="dpad-horizontal-row">
+            <button class="touch-btn dpad-btn" id="btn-touch-left" data-key="ArrowLeft" aria-label="Sol">
+              <span class="btn-glyph">⬅️</span>
+            </button>
+            <button class="touch-btn dpad-btn" id="btn-touch-down" data-key="ArrowDown" aria-label="Aşağı / Kaz">
+              <span class="btn-glyph">⬇️</span>
+            </button>
+            <button class="touch-btn dpad-btn" id="btn-touch-right" data-key="ArrowRight" aria-label="Sağ">
+              <span class="btn-glyph">➡️</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- RIGHT: CONSUMABLES & SHAFT ACTIONS -->
+        <div id="touch-actions">
+          <div class="touch-action-row">
+            <button class="touch-btn action-btn rail-btn" id="btn-touch-rail" data-action="elevatorRails" title="Asansör Rayı Döşe [C]">
+              <span class="btn-glyph">🏗️</span>
+              <span class="touch-badge" id="touch-badge-rail">0</span>
+            </button>
+            <button class="touch-btn action-btn dyn-btn" id="btn-touch-dyn" data-action="dynamite" title="Sismik Dinamit [X]">
+              <span class="btn-glyph">💣</span>
+              <span class="touch-badge" id="touch-badge-dyn">0</span>
+            </button>
+          </div>
+          <div class="touch-action-row">
+            <button class="touch-btn action-btn fuel-btn" id="btn-touch-fuel" data-action="fuelCanister" title="Yedek Yakıt [R]">
+              <span class="btn-glyph">⛽</span>
+              <span class="touch-badge" id="touch-badge-fuel">0</span>
+            </button>
+            <button class="touch-btn action-btn rep-btn" id="btn-touch-repair" data-action="repairKit" title="Tamir Kiti [T]">
+              <span class="btn-glyph">🔧</span>
+              <span class="touch-badge" id="touch-badge-repair">0</span>
+            </button>
+            <button class="touch-btn action-btn tp-btn" id="btn-touch-tp" data-action="teleporter" title="Yüzeye Işınlayıcı [Q]">
+              <span class="btn-glyph">🌀</span>
+              <span class="touch-badge" id="touch-badge-tp">0</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SHOP MODAL -->
+      <div id="shop-modal" class="modal-backdrop">
+        <div class="modal-box">
+          <div class="modal-header">
+            <h2>🏪 MINERAL TİCARET & GELİŞTİRME ATÖLYESİ</h2>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div id="shop-player-balance" style="background:#1e293b; border:1.5px solid #facc15; padding:4px 10px; border-radius:4px; font-family:monospace; font-size:12px; font-weight:bold; color:#facc15; display:flex; align-items:center; gap:6px;">
+                <span id="shop-balance-label">💰 BAKİYE:</span>
+                <span id="shop-balance-val">$0</span>
+              </div>
+              <button id="btn-close-shop" class="btn-close" title="Kapat (ESC)">[ESC] KAPAT</button>
+            </div>
+          </div>
+          <div class="modal-content">
+            <!-- SECTION 1: MADENLERİ SAT & MÜZE -->
+            <div class="shop-section">
+              <div class="section-title">💎 Maden Satışı</div>
+              <div id="shop-ore-list"></div>
+              <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:12px; font-weight:bold;">
+                <span>Toplam Değer:</span>
+                <span id="shop-total-value" style="color:#facc15;">$0</span>
+              </div>
+              <div style="display:flex; gap:8px; margin-top:10px;">
+                <button id="btn-sell-safe" class="btn-primary" style="background:#2563eb; margin-top:0; font-size:11px;" title="Geliştirmeler için gereken madenleri kargoda tutar, kalanı satar">🛡️ Üretim Haricini Sat</button>
+                <button id="btn-sell-all" class="btn-primary" style="margin-top:0; font-size:11px;">Tümünü Sat</button>
+              </div>
+
+              <div class="section-title" style="margin-top:14px;">🏛️ Arkeoloji Müzesi & Kalıntılar</div>
+              <div id="museum-container"></div>
+            </div>
+
+            <!-- SECTION 2: GELİŞTİRMELER & TEÇHİZAT -->
+            <div class="shop-section">
+              <div class="section-title">🛠️ Kapsül Geliştirmeleri</div>
+              <div id="upgrades-container"></div>
+
+              <div class="section-title" style="margin-top:12px;">🎒 Acil Durum Teçhizatı</div>
+              <div id="consumables-shop-container"></div>
+            </div>
+          </div>
+          <div style="padding: 0 18px 14px 18px;">
+            <button id="btn-close-shop-footer" class="btn-primary" style="background:#334155; border:1px solid #475569;">
+              🚀 Çıkış Yap / Uçuşa Dön [ESC veya W/A]
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- HELP & HOW TO PLAY MODAL -->
+      <div id="help-modal" class="modal-backdrop">
+        <div class="modal-box" style="width: 760px;">
+          <div class="modal-header">
+            <h2>📘 GÖREV REHBERİ & SİSTEM TALİMATNAMESİ</h2>
+            <button id="btn-close-help" class="btn-close" title="Kapat (ESC veya H)">[ESC / H] KAPAT</button>
+          </div>
+          <div class="modal-content" style="grid-template-columns: 1fr 1fr;">
+            <div class="shop-section">
+              <div class="section-title">🎮 Operasyonel Kontroller</div>
+              <div style="display:flex; flex-direction:column; gap:8px; font-size:12px; line-height:1.5;">
+                <div><strong style="color:#38bdf8;">W / ⬆️ Yukarı Ok</strong>: Roket İtki & Dikey Uçuş (Yakıt tüketir)</div>
+                <div><strong style="color:#38bdf8;">A/D / ⬅️/➡️ Yan Oklar</strong>: Paletli Yatay Sürüş</div>
+                <div><strong style="color:#38bdf8;">⬇️, ⬅️, ➡️ (Basılı Tut)</strong>: Yöne göre Matkapla Kazma (Yukarı kazılamaz)</div>
+                <div style="border-top:1px solid #1e293b; padding-top:6px; margin-top:2px;">
+                  <strong style="color:#38bdf8;">[R]</strong>: Yedek Yakıt (+50L)<br/>
+                  <strong style="color:#4ade80;">[T]</strong>: Tamir Kiti (+50 Gövde & ❄️ Acil Hararet Sıfırlama)<br/>
+                  <strong style="color:#38bdf8;">[Q]</strong>: Acil Işınlayıcı (Kargoyu korur!)<br/>
+                  <strong style="color:#facc15;">[X]</strong>: Sismik Dinamit (3x3 Patlatma & Maden Çekme)<br/>
+                  <strong style="color:#06b6d4;">[C]</strong>: Asansör Rayı Döşe (Boş tünele ray kurar; yerçekimsiz & sıfır yakıtlı ulaşım)<br/>
+                  <strong style="color:#22d3ee;">2x [W] / 2x [S]</strong>: <strong>Otomatik Asansör Seyri</strong> (Ray üzerindeyken iki kere W/Yukarı ile yüzeye kadar eller serbest otomatik çıkar; iki kere S/Aşağı ile tünel dibine kadar otomatik iner. Durdurmak: Boşluk veya ters yön)
+                </div>
+                <div style="border-top:1px solid #1e293b; padding-top:6px; margin-top:2px; color:#94a3b8; font-size:11px;">
+                  ⚠️ <strong>Sert İniş Uyarısı</strong>: Yüksek dikey hızla zemine çarpmak gövde hasarı verir.<br />
+                  ⛽ <strong>İkmal İstasyonu</strong>: Sol yüzeydeki istasyon yakıt ikmali ($0.75/L), gövde onarımı ($1.20/HP) ve anında soğutma sağlar.<br />
+                  🛠️ <strong>Hibrit Geliştirme</strong>: Seviye 2-5 geliştirmeler nakit paranın yanında kargoda ilgili derinlik cevherlerini (Demir, Gümüş, Altın, Zümrüt, Elmas) gerektirir.<br />
+                  ⚡ <strong>Termal Overdrive</strong>: %75-%99 Hararette matkap +%25 hız bonusu kazanır! %100'de motor 2.5s kilitlenir.<br />
+                  📦 <strong style="color:#facc15;">Madenci Sandıkları</strong>: Mağaralarda bulunur ($150-$750 ödül & eşyalar). Dokunarak, kazarak veya dinamitle açılabilir.<br />
+                  🏛️ <strong style="color:#f59e0b;">Kadim Fosiller & Müze</strong>: Kazı yaparken derinliğe bağlı 6 eşsiz rölik keşfedilebilir. Koleksiyon tamamlandığında müzeden +$15,000 küratör ödülü alınır!
+                </div>
+              </div>
+            </div>
+            <div class="shop-section">
+              <div class="section-title">💎 Çokgen Maden Değer Tablosu</div>
+              <div id="help-ore-table" style="overflow-x:auto;"></div>
+            </div>
+          </div>
+          <div style="padding: 0 18px 14px 18px; display:flex; justify-content:flex-end;">
+            <button class="btn-close" onclick="document.getElementById('btn-close-help').click()">Anladım, Kapat [ESC]</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TOW ALERT MODAL -->
+      <div id="tow-modal" class="modal-backdrop">
+        <div class="modal-box">
+          <div style="font-size:38px; margin-bottom:12px;">🚨</div>
+          <h2 id="tow-title" style="color:#ef4444; font-size:18px; margin-bottom:8px; font-family:monospace;">YAKIT BİTTİ!</h2>
+          <p id="tow-desc" style="color:#cbd5e1; font-size:13px; line-height:1.6; margin-bottom:16px;">
+            Yeraltında yakıtın tamamen tükendi. Acil durum kurtarma ekibi kapsülünü yüzeye çekti.<br />
+            <span style="color:#f87171; font-size:12px;">(Kargo haznesindeki tüm madenler kurtarma masrafı olarak kaybedildi!)</span><br />
+            Acil durum yakıt rezervi (%30) dolduruldu.
+          </p>
+          <button id="btn-close-tow" class="btn-primary" style="background:#2563eb;">Yüzeyde Devam Et</button>
+        </div>
+      </div>
+
+      <!-- VICTORY MODAL (550m Kadim Çekirdek Fethi) -->
+      <div id="victory-modal" class="modal-backdrop">
+        <div class="modal-box" style="width: 520px; text-align: center; border: 2px solid #ec4899; box-shadow: 0 0 50px rgba(236, 72, 153, 0.45); padding: 24px;">
+          <div style="font-size:48px; margin-bottom:8px;">👑</div>
+          <h2 style="color:#f43f5e; font-size:20px; font-weight:bold; letter-spacing:1px; margin-bottom:8px; font-family:monospace;">TEBRİKLER! YERALTI ÇEKİRDEĞİ FETHEDİLDİ</h2>
+          <p style="color:#cbd5e1; font-size:13px; line-height:1.6; margin-bottom:18px;">
+            550. metrenin en dibindeki devasa <strong style="color:#ec4899;">Kadim Dodecagon (12-Gen) Çekirdeği</strong>'ni başarıyla parçalayıp çıkardın!<br/>
+            Yeraltının tüm jeolojik gizemleri çözüldü ve operasyon mutlak zaferle sonuçlandı.
+          </p>
+          <div style="background:#1e293b; border:1px solid #334155; border-radius:6px; padding:14px; margin-bottom:20px; display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px; text-align:left;">
+            <div>⏱️ <strong>Toplam Süre:</strong> <span id="victory-time" style="color:#38bdf8; font-weight:bold;">00:00</span></div>
+            <div>💰 <strong>Mevcut Servet:</strong> <span id="victory-money" style="color:#facc15; font-weight:bold;">$0</span></div>
+            <div>🎒 <strong>Taşınan Kargo:</strong> <span id="victory-cargo" style="color:#4ade80; font-weight:bold;">0</span></div>
+            <div>🏆 <strong>Kadim Ödül:</strong> <span style="color:#ec4899; font-weight:bold;">+$50,000</span></div>
+          </div>
+          <button id="btn-continue-game" class="btn-primary" style="background:#ec4899; border:1px solid #f43f5e; font-size:13px; font-weight:bold;">
+            🚀 Oynamaya Devam Et
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      if (window.location.protocol === 'file:') {
+        window.addEventListener('DOMContentLoaded', () => {
+          const banner = document.createElement('div');
+          banner.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#ef4444;color:#fff;padding:16px;text-align:center;font-family:monospace;font-size:14px;font-weight:bold;z-index:99999;box-shadow:0 6px 20px rgba(0,0,0,0.8);';
+          banner.innerHTML = '⚠️ Oyun doğrudan dosya (file://) üzerinden çalışmaz. Lütfen tarayıcınızda <a href="http://localhost:5173/" target="_blank" style="color:#fef08a; text-decoration:underline;">http://localhost:5173/</a> adresini açın.';
+          document.body.prepend(banner);
+        });
+      }
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
