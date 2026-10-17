@@ -161,13 +161,14 @@ const network = new NetworkManager({
 
 /**
  * Safe save wrapper:
- * If this session ever became a guest session, NEVER allow saving to local solo storage!
+ * Solo session: saves to primary 'solo' slot ('polyminer_save_v1').
+ * Guest co-op session: saves to dedicated 'coop' slot ('polyminer_save_coop_v1'), preserving solo save 100% pristine!
  */
 function safeSaveGame(): boolean {
   if (wasGuestSession || (network.isConnected && !network.getIsHost())) {
-    return false;
+    return saveGame(player, world, playTime, 'coop');
   }
-  return saveGame(player, world, playTime);
+  return saveGame(player, world, playTime, 'solo');
 }
 
 // Pre-save solo game before connecting to any remote host

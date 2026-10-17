@@ -3,6 +3,13 @@ import { Tile, TileType } from './types';
 import { ORE_DEFINITIONS } from './constants';
 
 export const SAVE_KEY = 'polyminer_save_v1';
+export const SAVE_KEY_COOP = 'polyminer_save_coop_v1';
+
+export type SaveSlot = 'solo' | 'coop';
+
+export function getSaveKey(slot: SaveSlot = 'solo'): string {
+  return slot === 'coop' ? SAVE_KEY_COOP : SAVE_KEY;
+}
 
 export interface SavedTile {
   t: number;      // TileType
@@ -67,7 +74,12 @@ export function serializeWorld(world: Tile[][]): SavedTile[][] {
 /**
  * Serializes and saves current game state to localStorage.
  */
-export function saveGame(player: PlayerExtendedState, world: Tile[][], playTime: number): boolean {
+export function saveGame(
+  player: PlayerExtendedState,
+  world: Tile[][],
+  playTime: number,
+  slot: SaveSlot = 'solo'
+): boolean {
   try {
     const compactGrid = serializeWorld(world);
 
@@ -99,10 +111,10 @@ export function saveGame(player: PlayerExtendedState, world: Tile[][], playTime:
       grid: compactGrid
     };
 
-    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+    localStorage.setItem(getSaveKey(slot), JSON.stringify(saveData));
     return true;
   } catch (err) {
-    console.error('[POLYMINER] Auto-save error:', err);
+    console.error(`[POLYMINER] Auto-save error (${slot}):`, err);
     return false;
   }
 }
@@ -110,9 +122,9 @@ export function saveGame(player: PlayerExtendedState, world: Tile[][], playTime:
 /**
  * Attempts to load saved game from localStorage.
  */
-export function loadGame(): SaveData | null {
+export function loadGame(slot: SaveSlot = 'solo'): SaveData | null {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(getSaveKey(slot));
     if (!raw) return null;
     const data = JSON.parse(raw) as SaveData;
     if (!data || data.version !== 1 || !data.grid || !data.player) {
@@ -120,7 +132,7 @@ export function loadGame(): SaveData | null {
     }
     return data;
   } catch (err) {
-    console.error('[POLYMINER] Load save error:', err);
+    console.error(`[POLYMINER] Load save error (${slot}):`, err);
     return null;
   }
 }
@@ -228,6 +240,6 @@ export function applySavedGrid(savedGrid: SavedTile[][], world: Tile[][]): void 
 /**
  * Removes saved game from localStorage.
  */
-export function resetSave(): void {
-  localStorage.removeItem(SAVE_KEY);
+export function resetSave(slot: SaveSlot = 'solo'): void {
+  localStorage.removeItem(getSaveKey(slot));
 }
