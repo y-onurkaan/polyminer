@@ -216,19 +216,26 @@ export function applyLoadedGame(
  * Applies a compact saved grid onto the live world grid.
  */
 export function applySavedGrid(savedGrid: SavedTile[][], world: Tile[][]): void {
+  if (!Array.isArray(savedGrid) || !Array.isArray(world)) return;
+
   for (let y = 0; y < savedGrid.length && y < world.length; y++) {
     const savedRow = savedGrid[y];
     const worldRow = world[y];
+    if (!Array.isArray(savedRow) || !Array.isArray(worldRow)) continue;
+
     for (let x = 0; x < savedRow.length && x < worldRow.length; x++) {
       const savedTile = savedRow[x];
       const targetTile = worldRow[x];
+      if (!savedTile || typeof savedTile !== 'object' || !targetTile) continue;
 
-      targetTile.type = savedTile.t as TileType;
+      if (typeof savedTile.t === 'number') {
+        targetTile.type = savedTile.t as TileType;
+      }
       targetTile.revealed = savedTile.r === 1;
       targetTile.hasElevator = savedTile.e === 1;
-      targetTile.relicId = savedTile.m;
+      targetTile.relicId = typeof savedTile.m === 'string' ? savedTile.m : undefined;
 
-      if (savedTile.o && ORE_DEFINITIONS[savedTile.o]) {
+      if (savedTile.o && typeof savedTile.o === 'string' && ORE_DEFINITIONS[savedTile.o]) {
         targetTile.ore = ORE_DEFINITIONS[savedTile.o];
       } else {
         delete targetTile.ore;

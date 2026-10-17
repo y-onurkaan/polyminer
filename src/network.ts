@@ -1,6 +1,7 @@
 import { Peer, DataConnection } from 'peerjs';
 import { RemotePlayerState, TileType } from './types';
-import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, RELIC_DEFINITIONS } from './constants';
+import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, RELIC_DEFINITIONS, ORE_DEFINITIONS } from './constants';
+import { SavedTile } from './save';
 
 export interface RosterPlayer {
   id: string;
@@ -42,6 +43,63 @@ export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.ma
 export const isInt = (v: unknown): v is number => Number.isInteger(v);
 export const isValidWalletDelta = (delta: unknown): delta is number =>
   isFiniteNum(delta) && Math.abs(delta) <= 1e7 && Math.floor(delta) !== 0;
+
+export const VALID_TILE_TYPES: Set<number> = new Set([
+  TileType.EMPTY,
+  TileType.DIRT,
+  TileType.ROCK,
+  TileType.ORE,
+  TileType.SHOP_PAD,
+  TileType.FUEL_PAD,
+  TileType.GAS_POCKET,
+  TileType.MAGMA_ROCK,
+  TileType.ANCIENT_CORE,
+  TileType.CHEST
+]);
+
+export function isValidTileType(t: unknown): t is TileType {
+  return typeof t === 'number' && VALID_TILE_TYPES.has(t);
+}
+
+export function isValidSavedGrid(grid: unknown): grid is SavedTile[][] {
+  if (!Array.isArray(grid) || grid.length !== GRID_HEIGHT) {
+    return false;
+  }
+
+  for (let y = 0; y < GRID_HEIGHT; y++) {
+    const row = grid[y];
+    if (!Array.isArray(row) || row.length !== GRID_WIDTH) {
+      return false;
+    }
+    for (let x = 0; x < GRID_WIDTH; x++) {
+      const cell = row[x];
+      if (!cell || typeof cell !== 'object') {
+        return false;
+      }
+      if (!isInt(cell.t) || !isValidTileType(cell.t)) {
+        return false;
+      }
+      if (cell.r !== 0 && cell.r !== 1) {
+        return false;
+      }
+      if (cell.o !== undefined) {
+        if (typeof cell.o !== 'string' || !(cell.o in ORE_DEFINITIONS)) {
+          return false;
+        }
+      }
+      if (cell.m !== undefined) {
+        if (typeof cell.m !== 'string' || !(cell.m in RELIC_DEFINITIONS)) {
+          return false;
+        }
+      }
+      if (cell.e !== undefined && cell.e !== 1) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
 
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -355,7 +413,7 @@ export class NetworkManager {
       case 'WELCOME_SYNC': {
         if (!this.isHost && packet.payload && typeof packet.payload === 'object') {
           const { grid, sharedMoney, discoveredRelics } = packet.payload;
-          const safeGrid = Array.isArray(grid) && grid.length === GRID_HEIGHT ? grid : undefined;
+          const safeGrid = isValidSavedGrid(grid) ? grid : undefined;
           const safeMoney = isFiniteNum(sharedMoney) && sharedMoney >= 0 && sharedMoney < 1e9 ? Math.floor(sharedMoney) : 0;
           const safeRelics = Array.isArray(discoveredRelics)
             ? discoveredRelics.filter((id: unknown) => typeof id === 'string' && id in RELIC_DEFINITIONS)
@@ -421,6 +479,7 @@ export class NetworkManager {
         if (!p || typeof p !== 'object') break;
         if (!isInt(p.gx) || !isInt(p.gy)) break;
         if (p.gx < 0 || p.gx >= GRID_WIDTH || p.gy < 0 || p.gy >= GRID_HEIGHT) break;
+        if (!isValidTileType(p.tileType)) break;
 
         const rosterEntry = this.roster.get(sourceConn.peer);
         const safeActorName = this.isHost
@@ -430,7 +489,7 @@ export class NetworkManager {
         const validatedTile = {
           gx: p.gx,
           gy: p.gy,
-          tileType: typeof p.tileType === 'number' ? (p.tileType as TileType) : TileType.EMPTY,
+          tileType: p.tileType,
           hasElevator: !!p.hasElevator,
           sourcePlayerName: safeActorName
         };
