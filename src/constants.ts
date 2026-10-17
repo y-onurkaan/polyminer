@@ -9,8 +9,8 @@ export const SURFACE_ROW = 3; // Rows 0, 1, 2 are sky; Row 3 is surface level
 export const DEFAULT_RADAR_RADIUS = 2.5; // In tile units
 
 // Fall Damage Constants
-export const SAFE_LANDING_SPEED = 250; // px/s (impacts above this cause hull damage)
-export const FALL_DAMAGE_FACTOR = 0.35; // damage per px/s above threshold
+export const SAFE_LANDING_SPEED = 250; // px/s (1 block fall = ~240 px/s is 100% safe; damage starts after > 1 block)
+export const FALL_DAMAGE_FACTOR = 0.14; // damage per px/s above threshold (caps at ~71 HP base damage at 10-block cliff)
 
 // Rock Mining Requirements
 export const ROCK_MIN_DRILL_LEVEL = 4;

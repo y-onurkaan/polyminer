@@ -22,7 +22,7 @@ export const PLAYER_HEIGHT = 38;
 
 export const GRAVITY = 600; // px/s^2
 export const MOVE_SPEED = 190; // px/s
-export const MAX_FALL_SPEED = 380; // px/s
+export const MAX_FALL_SPEED = 760; // px/s (10-block cliff terminal velocity: sqrt(2 * 600 * 480px) = 758.9 px/s)
 export const MAX_FLY_SPEED = -280; // px/s
 export const BASE_THRUSTER_POWER = 1500; // px/s^2
 export const THRUST_FUEL_DRAIN = 3.5; // fuel/sec
@@ -1011,6 +1011,7 @@ export function updatePlayer(
           player.hull = Math.max(0, player.hull - damage);
           sounds.playImpactSound(damage);
           addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 12, `-${damage} DARBE`, '#ef4444');
+          addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT, Math.min(45, 18 + damage * 0.4), '#ef4444');
         }
       }
 
