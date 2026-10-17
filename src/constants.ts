@@ -10,7 +10,7 @@ export const DEFAULT_RADAR_RADIUS = 2.5; // In tile units
 
 // Fall Damage Constants
 export const SAFE_LANDING_SPEED = 250; // px/s (1 block fall = ~240 px/s is 100% safe; damage starts after > 1 block)
-export const FALL_DAMAGE_FACTOR = 0.14; // damage per px/s above threshold (caps at ~71 HP base damage at 10-block cliff)
+export const FALL_DAMAGE_FACTOR = 0.33; // damage per px/s above threshold (2 blocks = ~30 HP, caps at 10-block cliff)
 
 // Rock Mining Requirements
 export const ROCK_MIN_DRILL_LEVEL = 4;
