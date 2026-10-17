@@ -1377,15 +1377,12 @@ export class UIManager {
     // Bind Disconnect button
     if (this.btnCoopDisconnect) {
       this.btnCoopDisconnect.addEventListener('click', () => {
-        const wasGuest = !!(this.networkManager?.isConnected && !this.networkManager?.getIsHost());
+        const isHost = this.networkManager?.getIsHost();
         this.networkManager?.disconnect();
         if (this.coopHostInfo) this.coopHostInfo.style.display = 'none';
         if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'none';
-        this.showToast(wasGuest ? '🔌 Odadan ayrıldın. Kendi madenine dönülüyor...' : '🔌 Oda kapatıldı.', '#94a3b8');
-        if (wasGuest) {
-          setTimeout(() => {
-            window.location.reload();
-          }, 600);
+        if (isHost) {
+          this.showToast('🔌 Oda kapatıldı.', '#94a3b8');
         }
       });
     }

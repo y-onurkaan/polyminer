@@ -58,12 +58,16 @@ try {
 // UI Manager
 const uiManager = new UIManager();
 
+let wasGuestSession = false;
+let isReloading = false;
+
 // Network Manager (P2P WebRTC)
 const network = new NetworkManager({
   getGridSyncData: () => serializeWorld(world),
   getSharedMoney: () => player.money,
   getDiscoveredRelics: () => player.discoveredRelics || [],
   onWelcomeSync: (data) => {
+    wasGuestSession = true;
     if (data.grid && Array.isArray(data.grid) && data.grid.length === GRID_HEIGHT) {
       applySavedGrid(data.grid, world);
     }
@@ -140,6 +144,15 @@ const network = new NetworkManager({
   },
   onStatusChange: (statusText, isConnected, peerCount) => {
     uiManager.updateCoopHUD(statusText, isConnected, peerCount);
+    // If was in a guest session and connection dropped (host closed room or network dropped),
+    // prevent any autosave and cleanly reload so guest returns safely to their pristine solo save!
+    if (wasGuestSession && !isConnected && !isReloading) {
+      isReloading = true;
+      uiManager.showToast('🔌 Bağlantı kesildi. Kendi madenine dönülüyor...', '#f59e0b');
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+    }
   },
   onRosterUpdate: (roster) => {
     uiManager.updateCoopRoster(roster);
@@ -148,10 +161,10 @@ const network = new NetworkManager({
 
 /**
  * Safe save wrapper:
- * If connected to an online co-op room as a GUEST, NEVER overwrite local solo save with Host's world!
+ * If this session ever became a guest session, NEVER allow saving to local solo storage!
  */
 function safeSaveGame(): boolean {
-  if (network.isConnected && !network.getIsHost()) {
+  if (wasGuestSession || (network.isConnected && !network.getIsHost())) {
     return false;
   }
   return saveGame(player, world, playTime);
