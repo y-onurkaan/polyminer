@@ -915,7 +915,7 @@ export function renderWorld(
 }
 
 /**
- * Draws the vertical mini-radar map on the right edge of the screen.
+ * Draws the vertical mini-radar map on the left edge of the screen.
  */
 function renderMiniRadar(
   ctx: CanvasRenderingContext2D,
@@ -928,8 +928,13 @@ function renderMiniRadar(
 ): void {
   const radarW = 54;
   const radarH = 252;
-  const radarX = viewportWidth - radarW - 12;
-  const radarY = viewportHeight - radarH - 12;
+  const radarX = 12;
+  
+  // Sol kenarda konumlandırma: Masaüstünde sol-altta, mobilde dokunmatik D-pad'in hemen üzerinde
+  let radarY = viewportHeight - radarH - 12;
+  if (viewportWidth <= 900 && radarY + radarH > viewportHeight - 130) {
+    radarY = Math.max(48, viewportHeight - radarH - 130);
+  }
   const now = performance.now();
 
   ctx.save();
