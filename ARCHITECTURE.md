@@ -1,73 +1,48 @@
-# PROJECT: POLYMINER (2D Minimalist Motherload Clone)
+# POLYMINER Mimarisi
 
-## 1. Tech Stack & Constraints
-- Bundler: Vite (Vanilla-TS)
-- Language: Strict TypeScript (Pure HTML5 Canvas 2D API, NO external game engines)
-- Visual Style: Minimalist 2D geometry. No particle explosions. Ores inside dirt blocks are drawn as clean regular polygons where more sides = higher value (Triangle -> Square -> Pentagon -> Hexagon -> Heptagon -> Octagon).
+## 1. Teknoloji ve Kısıtlar
+- Bundler: Vite (Vanilla TS), strict TypeScript
+- Çizim: saf HTML5 Canvas 2D, harici oyun motoru yok
+- Görsel stil: minimalist geometri. Madenler düzgün çokgendir, kenar sayısı arttıkça değer artar (üçgen → ... → on ikigen).
+- Dağıtım: GitHub Actions ile GitHub Pages (`.github/workflows/deploy.yml`)
 
-## 2. Core Constants (src/constants.ts)
-- TILE_SIZE = 48
-- GRID_WIDTH = 24
-- GRID_HEIGHT = 120
-- SURFACE_ROW = 3 (Rows 0, 1, 2 are sky; Row 3 is surface level)
+## 2. Temel Sabitler (`src/constants.ts`)
+- `TILE_SIZE = 48`, `GRID_WIDTH = 24`, `GRID_HEIGHT = 280`
+- `SURFACE_ROW = 3` (0-2 gökyüzü, 3 yüzey)
+- `ROCK_MIN_DRILL_LEVEL = 4`: kaya için en az matkap seviyesi
+- `SAFE_LANDING_SPEED`, `FALL_DAMAGE_FACTOR`: düşme hasarı
+- `BIOMES`: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği
+- `ORE_DEFINITIONS`: Bakır (3 kenar) → Elmas (8 kenar) ve Kadim Çekirdek (12 kenar)
+- `RELIC_DEFINITIONS`: müzede sergilenen fosiller
+- `CONSUMABLES`: yedek yakıt, tamir kiti, ışınlayıcı, dinamit, asansör rayı
 
-## 3. Data Structures (src/types.ts)
-export enum TileType {
-  EMPTY = 0,
-  DIRT = 1,
-  ROCK = 2,
-  ORE = 3,
-  SHOP_PAD = 4,
-  FUEL_PAD = 5
-}
+Güncel sayısal değerler için kaynak olarak bu dosya esastır.
 
-export interface OreDefinition {
-  id: string;
-  name: string;
-  sides: number;      // 3 to 8
-  color: string;
-  value: number;
-  weight: number;
-  minDepth: number;
-  hardness: number;
-}
+## 3. Modüller (`src/`)
 
-export interface Tile {
-  type: TileType;
-  ore?: OreDefinition;
-  hardness: number;
-}
+| Dosya | Sorumluluk |
+|---|---|
+| `main.ts` | Giriş noktası, oyun döngüsü, klavye ve dokunmatik girdi, otomatik kayıt tetikleme |
+| `types.ts` | `TileType`, `Tile`, `OreDefinition`, `RelicDefinition`, `PlayerState` vb. tipler |
+| `constants.ts` | Sabitler, biyomlar, maden / fosil / sarf tanımları |
+| `world.ts` | Harita üretimi (`generateWorld`), sis açma (`revealTilesAround`), `getTile` |
+| `player.ts` | Fizik, matkap, yakıt/ısı/hasar, asansör rayı, dinamit, sandık, çekme ve ışınlanma (`updatePlayer`) |
+| `boulders.ts` | Düşen kayalar |
+| `effects.ts` | Yüzen yazılar ve şok dalgaları |
+| `renderer.ts` | Dünya, oyuncu ve çokgen çizimi |
+| `ui.ts` | HUD, dükkân, geliştirmeler (`UPGRADES`), müze, yardım paneli (`UIManager`) |
+| `save.ts` | `localStorage` kaydı / yüklemesi (`SAVE_KEY`) |
+| `audio.ts` | Web Audio ile ses motoru (`SoundEngine`) |
 
-export interface PlayerState {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  fuel: number;
-  maxFuel: number;
-  cargo: OreDefinition[];
-  maxCargo: number;
-  money: number;
-  drillSpeed: number;
-  thrusterPower: number;
-  isDrilling: boolean;
-  drillProgress: number;
-  drillTarget: { gx: number; gy: number } | null;
-}
+`index.html` stilleri, HUD ve panel iskeletini içerir.
 
-## 4. Ore Table (Polygon Rule)
-1. Copper (3 sides - Triangle): #d97706, Value: 15, Depth: 3+, Hardness: 1.0
-2. Iron (4 sides - Square): #94a3b8, Value: 35, Depth: 10+, Hardness: 1.3
-3. Silver (5 sides - Pentagon): #e2e8f0, Value: 80, Depth: 25+, Hardness: 1.7
-4. Gold (6 sides - Hexagon): #facc15, Value: 180, Depth: 45+, Hardness: 2.2
-5. Emerald (7 sides - Heptagon): #10b981, Value: 400, Depth: 70+, Hardness: 3.0
-6. Diamond (8 sides - Octagon): #38bdf8, Value: 1000, Depth: 95+, Hardness: 4.0
+## 4. Veri Akışı
+1. `main.ts` her karede girdiyi toplar ve `updatePlayer` ile oyuncuyu günceller.
+2. `player.ts`, `world.ts` içindeki `Tile[][]` gridi üzerinde çarpışma ve kazı yapar. Kazılan bloklar kargoya veya envantere işlenir.
+3. `boulders.ts` ve `effects.ts` yan sistemleri günceller.
+4. `renderer.ts` gridi, oyuncuyu ve efektleri canvas'a çizer. `ui.ts` HUD ve panelleri DOM üzerinden günceller.
+5. `save.ts` periyodik olarak ve önemli olaylarda oyuncuyu ve dünyayı serileştirir.
 
-## 5. Directory Structure
-- src/constants.ts
-- src/types.ts
-- src/world.ts
-- src/player.ts
-- src/renderer.ts
-- src/ui.ts
-- src/main.ts
+## 5. Notlar
+- Dünya her oyunda üretilir. Kaydedilen kazı ve keşif durumu `save.ts` ile geri uygulanır.
+- Kayıt anahtarı `polyminer_save_v1`'dir. Şema değişirse sürüm artırılmalıdır.

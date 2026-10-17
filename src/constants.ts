@@ -128,7 +128,7 @@ export const CONSUMABLES = {
     id: 'elevatorRails',
     name: 'Asansör Rayı',
     key: 'C',
-    cost: 2.5,
+    cost: 25,
     amount: 1,
     desc: 'Çelik Ray (Boş hücreye [C] ile döşenir, yerçekimsiz & yakıtsız ulaşım)'
   }
