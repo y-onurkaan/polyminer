@@ -1,9 +1,19 @@
 import { PlayerExtendedState } from './player';
 import { OreDefinition, ConsumableInventory, CHASSIS_COLORS } from './types';
-import { NetworkManager, RosterPlayer } from './network';
+import { NetworkManager, RosterPlayer, sanitizeColor, sanitizeName } from './network';
 import { CONSUMABLES, ORES, BIOMES, RELIC_DEFINITIONS, MUSEUM_CURATOR_REWARD } from './constants';
 import { sounds } from './audio';
 import { addFloatingText } from './effects';
+
+export function escapeHtml(str: string): string {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export interface OreRequirement {
   [oreId: string]: number;
@@ -1343,6 +1353,9 @@ export class UIManager {
         this.btnCoopJoinRoom!.disabled = true;
         this.btnCoopJoinRoom!.innerText = '⏳ Bağlanıyor...';
 
+        // Pre-save solo game before connecting to any remote host
+        window.dispatchEvent(new CustomEvent('polyminer:pre-join'));
+
         this.networkManager!.joinRoom(
           inputVal,
           () => {
@@ -1364,10 +1377,16 @@ export class UIManager {
     // Bind Disconnect button
     if (this.btnCoopDisconnect) {
       this.btnCoopDisconnect.addEventListener('click', () => {
+        const wasGuest = !!(this.networkManager?.isConnected && !this.networkManager?.getIsHost());
         this.networkManager?.disconnect();
         if (this.coopHostInfo) this.coopHostInfo.style.display = 'none';
         if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'none';
-        this.showToast('🔌 Odadan ayrıldın.', '#94a3b8');
+        this.showToast(wasGuest ? '🔌 Odadan ayrıldın. Kendi madenine dönülüyor...' : '🔌 Oda kapatıldı.', '#94a3b8');
+        if (wasGuest) {
+          setTimeout(() => {
+            window.location.reload();
+          }, 600);
+        }
       });
     }
   }
@@ -1442,13 +1461,13 @@ export class UIManager {
       if (isConnected && this.networkManager?.getRoomCode()) {
         const code = this.networkManager.getRoomCode()!;
         const displayCode = code.startsWith('POLY-') ? code : `POLY-${code}`;
-        this.btnOpenCoop.innerHTML = `🟢 ODA: ${displayCode} (${peerCount} Kişi)`;
+        this.btnOpenCoop.textContent = `🟢 ODA: ${displayCode} (${peerCount} Kişi)`;
         this.btnOpenCoop.style.borderColor = '#10b981';
         this.btnOpenCoop.style.color = '#34d399';
         this.btnOpenCoop.style.background = 'rgba(16, 185, 129, 0.22)';
         this.btnOpenCoop.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
       } else {
-        this.btnOpenCoop.innerHTML = '🌐 CO-OP (Tek Kişi)';
+        this.btnOpenCoop.textContent = '🌐 CO-OP (Tek Kişi)';
         this.btnOpenCoop.style.borderColor = '#06b6d4';
         this.btnOpenCoop.style.color = '#22d3ee';
         this.btnOpenCoop.style.background = 'rgba(6, 182, 212, 0.18)';
@@ -1468,14 +1487,17 @@ export class UIManager {
       return;
     }
 
+    const localId = this.networkManager?.getLocalId();
     let html = '';
     for (const p of roster) {
-      const isMe = this.networkManager?.localName === p.name;
+      const isMe = localId ? p.id === localId : this.networkManager?.localName === p.name;
+      const safeColor = sanitizeColor(p.color, '#00f2fe');
+      const safeName = escapeHtml(sanitizeName(p.name, 'Misafir'));
       html += `
-        <div class="roster-card" style="border-left: 3px solid ${p.color};">
+        <div class="roster-card" style="border-left: 3px solid ${safeColor};">
           <div style="display:flex; align-items:center; gap:8px;">
-            <div style="width:12px; height:12px; border-radius:50%; background:${p.color}; box-shadow:0 0 6px ${p.color};"></div>
-            <strong style="color:#f8fafc;">${p.name} ${isMe ? '(Sen)' : ''}</strong>
+            <div style="width:12px; height:12px; border-radius:50%; background:${safeColor}; box-shadow:0 0 6px ${safeColor};"></div>
+            <strong style="color:#f8fafc;">${safeName} ${isMe ? '(Sen)' : ''}</strong>
           </div>
           <div style="display:flex; align-items:center; gap:6px;">
             ${p.isHost ? '<span style="background:#0284c7; color:#fff; font-size:9px; padding:1px 5px; border-radius:3px; font-weight:bold;">HOST</span>' : '<span style="background:#334155; color:#94a3b8; font-size:9px; padding:1px 5px; border-radius:3px;">MİSAFİR</span>'}

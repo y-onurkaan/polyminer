@@ -1,5 +1,6 @@
 import { Peer, DataConnection } from 'peerjs';
 import { RemotePlayerState, TileType } from './types';
+import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, RELIC_DEFINITIONS } from './constants';
 
 export interface RosterPlayer {
   id: string;
@@ -24,6 +25,22 @@ export interface NetworkCallbacks {
   onRosterUpdate?: (roster: RosterPlayer[]) => void;
 }
 
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+export function sanitizeName(raw: unknown, fallback: string = 'Madenci'): string {
+  if (typeof raw !== 'string') return fallback;
+  const cleaned = raw.replace(/[\u0000-\u001f\u007f<>&"'`]/g, '').trim().slice(0, 16);
+  return cleaned || fallback;
+}
+
+export function sanitizeColor(raw: unknown, fallback: string = '#00f2fe'): string {
+  return typeof raw === 'string' && HEX_COLOR_RE.test(raw) ? raw : fallback;
+}
+
+export const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+export const isInt = (v: unknown): v is number => Number.isInteger(v);
+
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   let code = '';
@@ -47,20 +64,24 @@ export class NetworkManager {
   public isConnected: boolean = false;
   private lastStateBroadcast: number = 0;
 
+  public getLocalId(): string | null {
+    return this.peer?.id ?? null;
+  }
+
   constructor(callbacks: NetworkCallbacks) {
     this.callbacks = callbacks;
     // Load cached profile
     try {
       const savedName = localStorage.getItem('polyminer_net_name');
-      if (savedName) this.localName = savedName;
+      if (savedName) this.localName = sanitizeName(savedName, 'Madenci');
       const savedColor = localStorage.getItem('polyminer_net_color');
-      if (savedColor) this.localColor = savedColor;
+      if (savedColor) this.localColor = sanitizeColor(savedColor, '#00f2fe');
     } catch (_) {}
   }
 
   public setProfile(name: string, color: string) {
-    this.localName = name.trim().slice(0, 16) || 'Madenci';
-    this.localColor = color || '#00f2fe';
+    this.localName = sanitizeName(name, 'Madenci');
+    this.localColor = sanitizeColor(color, '#00f2fe');
     try {
       localStorage.setItem('polyminer_net_name', this.localName);
       localStorage.setItem('polyminer_net_color', this.localColor);
@@ -231,14 +252,20 @@ export class NetworkManager {
 
   private handleIncomingConnection(conn: DataConnection) {
     conn.on('open', () => {
+      // Room capacity limit: max 8 players (Host + 7 guests)
+      if (this.connections.size >= 7) {
+        conn.close();
+        return;
+      }
+
       this.connections.set(conn.peer, conn);
 
-      // Register temporary roster item
+      // Register temporary roster item with sanitized name and color
       const meta = conn.metadata || {};
       this.roster.set(conn.peer, {
         id: conn.peer,
-        name: meta.name || 'Misafir',
-        color: meta.color || '#38bdf8',
+        name: sanitizeName(meta.name, 'Misafir'),
+        color: sanitizeColor(meta.color, '#38bdf8'),
         isHost: false
       });
 
@@ -274,20 +301,28 @@ export class NetworkManager {
   }
 
   private handlePacket(packet: any, sourceConn: DataConnection) {
-    if (!packet || !packet.type) return;
+    if (!packet || typeof packet !== 'object' || typeof packet.type !== 'string') return;
+
+    // Guests only accept packets directly from Host connection
+    if (!this.isHost && this.hostConn && sourceConn !== this.hostConn) {
+      return;
+    }
 
     switch (packet.type) {
       case 'PLAYER_INTRO': {
         const p = packet.payload;
+        if (!p || typeof p !== 'object') break;
         const entry = this.roster.get(sourceConn.peer);
+        const safeName = sanitizeName(p.name, entry ? entry.name : 'Misafir');
+        const safeColor = sanitizeColor(p.color, entry ? entry.color : '#38bdf8');
         if (entry) {
-          entry.name = p.name || entry.name;
-          entry.color = p.color || entry.color;
+          entry.name = safeName;
+          entry.color = safeColor;
         } else {
           this.roster.set(sourceConn.peer, {
             id: sourceConn.peer,
-            name: p.name || 'Misafir',
-            color: p.color || '#38bdf8',
+            name: safeName,
+            color: safeColor,
             isHost: false
           });
         }
@@ -296,9 +331,19 @@ export class NetworkManager {
       }
 
       case 'ROSTER_UPDATE': {
-        if (!this.isHost && packet.payload?.roster) {
+        if (!this.isHost && packet.payload?.roster && Array.isArray(packet.payload.roster)) {
           this.roster.clear();
-          packet.payload.roster.forEach((r: RosterPlayer) => this.roster.set(r.id, r));
+          for (const r of packet.payload.roster) {
+            if (r && typeof r === 'object' && typeof r.id === 'string') {
+              this.roster.set(r.id, {
+                id: String(r.id).slice(0, 64),
+                name: sanitizeName(r.name, 'Misafir'),
+                color: sanitizeColor(r.color, '#38bdf8'),
+                isHost: !!r.isHost,
+                depthMeters: isFiniteNum(r.depthMeters) ? Math.max(0, Math.floor(r.depthMeters)) : undefined
+              });
+            }
+          }
           this.callbacks.onRosterUpdate?.(Array.from(this.roster.values()));
           this.callbacks.onStatusChange?.(`Oda: ${this.roomCode}`, true, this.roster.size);
         }
@@ -306,56 +351,178 @@ export class NetworkManager {
       }
 
       case 'WELCOME_SYNC': {
-        if (!this.isHost && packet.payload) {
-          this.callbacks.onWelcomeSync?.(packet.payload);
+        if (!this.isHost && packet.payload && typeof packet.payload === 'object') {
+          const { grid, sharedMoney, discoveredRelics } = packet.payload;
+          const safeGrid = Array.isArray(grid) && grid.length === GRID_HEIGHT ? grid : undefined;
+          const safeMoney = isFiniteNum(sharedMoney) && sharedMoney >= 0 && sharedMoney < 1e9 ? Math.floor(sharedMoney) : 0;
+          const safeRelics = Array.isArray(discoveredRelics)
+            ? discoveredRelics.filter((id: unknown) => typeof id === 'string' && id in RELIC_DEFINITIONS)
+            : [];
+          this.callbacks.onWelcomeSync?.({
+            grid: safeGrid as any,
+            sharedMoney: safeMoney,
+            discoveredRelics: safeRelics
+          });
         }
         break;
       }
 
       case 'PLAYER_STATE': {
-        const payload: RemotePlayerState = packet.payload;
-        this.callbacks.onRemotePlayerUpdate?.(payload);
-        // Relay to other clients if Host
+        const p = packet.payload;
+        if (!p || typeof p !== 'object') break;
+
+        // In Host mode: overwrite ID with verified peer ID, and name/color from authoritative roster!
+        const playerId = this.isHost ? sourceConn.peer : (typeof p.id === 'string' ? p.id.slice(0, 64) : null);
+        if (!playerId) break;
+
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const verifiedName = this.isHost ? (rosterEntry?.name || 'Misafir') : sanitizeName(p.name, 'Misafir');
+        const verifiedColor = this.isHost ? (rosterEntry?.color || '#38bdf8') : sanitizeColor(p.color, '#38bdf8');
+
+        if (!isFiniteNum(p.x) || !isFiniteNum(p.y)) break;
+        const safeX = clamp(p.x, 0, GRID_WIDTH * TILE_SIZE);
+        const safeY = clamp(p.y, 0, GRID_HEIGHT * TILE_SIZE);
+        const safeVx = isFiniteNum(p.vx) ? clamp(p.vx, -2000, 2000) : 0;
+        const safeVy = isFiniteNum(p.vy) ? clamp(p.vy, -2000, 2000) : 0;
+        const safeFacing = (p.facing === 'left' || p.facing === 'right' || p.facing === 'down') ? p.facing : 'down';
+        const safeDrillProgress = isFiniteNum(p.drillProgress) ? clamp(p.drillProgress, 0, 1) : 0;
+        const safeDrillTier = isFiniteNum(p.drillTier) ? clamp(Math.floor(p.drillTier), 1, 10) : 1;
+
+        const validatedState: RemotePlayerState = {
+          id: playerId,
+          name: verifiedName,
+          color: verifiedColor,
+          x: safeX,
+          y: safeY,
+          vx: safeVx,
+          vy: safeVy,
+          facing: safeFacing,
+          isDrilling: !!p.isDrilling,
+          drillProgress: safeDrillProgress,
+          isThrusting: !!p.isThrusting,
+          drillTier: safeDrillTier,
+          lastSeen: Date.now()
+        };
+
+        this.callbacks.onRemotePlayerUpdate?.(validatedState);
         if (this.isHost) {
-          this.broadcast(packet, sourceConn.peer);
+          this.broadcast({
+            type: 'PLAYER_STATE',
+            payload: validatedState
+          }, sourceConn.peer);
         }
         break;
       }
 
       case 'TILE_UPDATE': {
-        this.callbacks.onTileUpdate?.(packet.payload);
+        const p = packet.payload;
+        if (!p || typeof p !== 'object') break;
+        if (!isInt(p.gx) || !isInt(p.gy)) break;
+        if (p.gx < 0 || p.gx >= GRID_WIDTH || p.gy < 0 || p.gy >= GRID_HEIGHT) break;
+
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const safeActorName = this.isHost
+          ? (rosterEntry?.name || 'Madenci')
+          : sanitizeName(p.sourcePlayerName, 'Madenci');
+
+        const validatedTile = {
+          gx: p.gx,
+          gy: p.gy,
+          tileType: typeof p.tileType === 'number' ? (p.tileType as TileType) : TileType.EMPTY,
+          hasElevator: !!p.hasElevator,
+          sourcePlayerName: safeActorName
+        };
+
+        this.callbacks.onTileUpdate?.(validatedTile);
         if (this.isHost) {
-          this.broadcast(packet, sourceConn.peer);
+          this.broadcast({
+            type: 'TILE_UPDATE',
+            payload: validatedTile
+          }, sourceConn.peer);
         }
         break;
       }
 
       case 'SHARED_WALLET_UPDATE': {
-        this.callbacks.onSharedWalletUpdate?.(packet.payload);
+        const p = packet.payload;
+        if (!p || typeof p !== 'object') break;
+        if (!isFiniteNum(p.money) || p.money < 0 || p.money > 1e9) break;
+        if (!isFiniteNum(p.changeAmount) || Math.abs(p.changeAmount) > 1e8) break;
+
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const safeActorName = this.isHost
+          ? (rosterEntry?.name || 'Madenci')
+          : sanitizeName(p.actorName, 'Madenci');
+        const safeReason = typeof p.reason === 'string' ? p.reason.slice(0, 40) : 'Ortak İşlem';
+
+        const validatedWallet = {
+          money: Math.floor(p.money),
+          changeAmount: Math.floor(p.changeAmount),
+          reason: safeReason,
+          actorName: safeActorName
+        };
+
+        this.callbacks.onSharedWalletUpdate?.(validatedWallet);
         if (this.isHost) {
-          this.broadcast(packet, sourceConn.peer);
+          this.broadcast({
+            type: 'SHARED_WALLET_UPDATE',
+            payload: validatedWallet
+          }, sourceConn.peer);
         }
         break;
       }
 
       case 'SHARED_RELIC_UPDATE': {
-        this.callbacks.onSharedRelicUpdate?.(packet.payload);
+        const p = packet.payload;
+        if (!p || typeof p !== 'object' || typeof p.relicId !== 'string') break;
+        if (!(p.relicId in RELIC_DEFINITIONS)) break;
+
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const safeActorName = this.isHost
+          ? (rosterEntry?.name || 'Madenci')
+          : sanitizeName(p.actorName, 'Madenci');
+
+        const validatedRelic = {
+          relicId: p.relicId,
+          actorName: safeActorName
+        };
+
+        this.callbacks.onSharedRelicUpdate?.(validatedRelic);
         if (this.isHost) {
-          this.broadcast(packet, sourceConn.peer);
+          this.broadcast({
+            type: 'SHARED_RELIC_UPDATE',
+            payload: validatedRelic
+          }, sourceConn.peer);
         }
         break;
       }
 
       case 'VICTORY_EVENT': {
-        this.callbacks.onVictory?.(packet.payload);
+        const p = packet.payload;
+        if (!p || typeof p !== 'object') break;
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const safeWinner = this.isHost
+          ? (rosterEntry?.name || 'Bir Madenci')
+          : sanitizeName(p.winnerName, 'Bir Madenci');
+
+        const validatedVictory = {
+          winnerName: safeWinner
+        };
+
+        this.callbacks.onVictory?.(validatedVictory);
         if (this.isHost) {
-          this.broadcast(packet, sourceConn.peer);
+          this.broadcast({
+            type: 'VICTORY_EVENT',
+            payload: validatedVictory
+          }, sourceConn.peer);
         }
         break;
       }
 
       case 'PLAYER_LEFT': {
-        this.callbacks.onRemotePlayerLeave?.(packet.payload?.id);
+        if (packet.payload && typeof packet.payload.id === 'string') {
+          this.callbacks.onRemotePlayerLeave?.(packet.payload.id);
+        }
         break;
       }
     }
