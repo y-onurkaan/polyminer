@@ -1,4 +1,4 @@
-import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, SURFACE_ROW } from './constants';
+import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, SURFACE_ROW, RELIC_DEFINITIONS } from './constants';
 import { generateWorld, revealAdjacentTiles } from './world';
 import { renderWorld, renderPlayer, renderRemotePlayers } from './renderer';
 import {
@@ -57,10 +57,6 @@ try {
 
 // UI Manager
 const uiManager = new UIManager();
-uiManager.setPlayerRef(player, () => {
-  // Callback when purchase/sell happens: save immediately!
-  saveGame(player, world, playTime);
-});
 
 // Network Manager (P2P WebRTC)
 const network = new NetworkManager({
@@ -68,14 +64,14 @@ const network = new NetworkManager({
   getSharedMoney: () => player.money,
   getDiscoveredRelics: () => player.discoveredRelics || [],
   onWelcomeSync: (data) => {
-    if (data.grid) {
+    if (data.grid && Array.isArray(data.grid) && data.grid.length === GRID_HEIGHT) {
       applySavedGrid(data.grid, world);
     }
-    if (typeof data.sharedMoney === 'number') {
-      player.money = data.sharedMoney;
+    if (typeof data.sharedMoney === 'number' && Number.isFinite(data.sharedMoney) && data.sharedMoney >= 0) {
+      player.money = Math.floor(data.sharedMoney);
     }
     if (Array.isArray(data.discoveredRelics)) {
-      player.discoveredRelics = [...data.discoveredRelics];
+      player.discoveredRelics = data.discoveredRelics.filter(id => typeof id === 'string' && id in RELIC_DEFINITIONS);
     }
     uiManager.showToast('🗺️ Host Haritası & Ortak Kasa Eşitlendi!', '#10b981');
   },
@@ -90,41 +86,47 @@ const network = new NetworkManager({
     }
   },
   onTileUpdate: (data) => {
-    if (data.gy >= 0 && data.gy < world.length && data.gx >= 0 && data.gx < GRID_WIDTH) {
+    if (Number.isInteger(data.gy) && Number.isInteger(data.gx) &&
+        data.gy >= 0 && data.gy < world.length && data.gx >= 0 && data.gx < GRID_WIDTH) {
       const tile = world[data.gy][data.gx];
-      if (data.hasElevator) {
-        tile.hasElevator = true;
-        tile.type = TileType.EMPTY;
-        tile.revealed = true;
-        delete tile.ore;
-        tile.hardness = 0;
-        revealAdjacentTiles(world, data.gx, data.gy);
-      } else if (data.tileType === TileType.EMPTY) {
-        tile.type = TileType.EMPTY;
-        delete tile.ore;
-        tile.hardness = 0;
-        tile.revealed = true;
-        revealAdjacentTiles(world, data.gx, data.gy);
+      if (tile) {
+        if (data.hasElevator) {
+          tile.hasElevator = true;
+          tile.type = TileType.EMPTY;
+          tile.revealed = true;
+          delete tile.ore;
+          tile.hardness = 0;
+          revealAdjacentTiles(world, data.gx, data.gy);
+        } else if (data.tileType === TileType.EMPTY) {
+          tile.type = TileType.EMPTY;
+          delete tile.ore;
+          tile.hardness = 0;
+          tile.revealed = true;
+          revealAdjacentTiles(world, data.gx, data.gy);
+        }
       }
     }
   },
   onSharedWalletUpdate: (data) => {
-    player.money = data.money;
+    if (typeof data.money === 'number' && Number.isFinite(data.money) && data.money >= 0) {
+      player.money = Math.floor(data.money);
+    }
     const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
     const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
     uiManager.updateHUD(player, depthMeters, false);
 
     if (data.actorName !== network.localName) {
-      const isGain = data.changeAmount > 0;
+      const change = Number(data.changeAmount) || 0;
+      const isGain = change > 0;
       const msg = isGain
-        ? `🤝 [${data.actorName}] +$${data.changeAmount.toLocaleString()} kazandı! (${data.reason})`
-        : `💸 [${data.actorName}] ${data.reason} aldı (-$${Math.abs(data.changeAmount).toLocaleString()})`;
+        ? `🤝 [${data.actorName}] +$${change.toLocaleString()} kazandı! (${data.reason})`
+        : `💸 [${data.actorName}] ${data.reason} aldı (-$${Math.abs(change).toLocaleString()})`;
       uiManager.showToast(msg, isGain ? '#10b981' : '#f59e0b');
     }
   },
   onSharedRelicUpdate: (data) => {
     if (!player.discoveredRelics) player.discoveredRelics = [];
-    if (!player.discoveredRelics.includes(data.relicId)) {
+    if (typeof data.relicId === 'string' && data.relicId in RELIC_DEFINITIONS && !player.discoveredRelics.includes(data.relicId)) {
       player.discoveredRelics.push(data.relicId);
       if (data.actorName !== network.localName) {
         uiManager.showToast(`🏛️ [${data.actorName}] yeni bir kadim fosil keşfetti!`, '#f59e0b');
@@ -142,6 +144,27 @@ const network = new NetworkManager({
   onRosterUpdate: (roster) => {
     uiManager.updateCoopRoster(roster);
   }
+});
+
+/**
+ * Safe save wrapper:
+ * If connected to an online co-op room as a GUEST, NEVER overwrite local solo save with Host's world!
+ */
+function safeSaveGame(): boolean {
+  if (network.isConnected && !network.getIsHost()) {
+    return false;
+  }
+  return saveGame(player, world, playTime);
+}
+
+// Pre-save solo game before connecting to any remote host
+window.addEventListener('polyminer:pre-join', () => {
+  saveGame(player, world, playTime);
+});
+
+uiManager.setPlayerRef(player, () => {
+  // Callback when purchase/sell happens: save safely!
+  safeSaveGame();
 });
 
 // Initialize Co-op Lobby in UI
@@ -174,7 +197,7 @@ window.addEventListener('polyminer:victory', (e: any) => {
   const winner = e.detail?.winnerName || player.name || network.localName || 'Madenci';
   network.broadcastVictory(winner);
   uiManager.showVictory(playTime, player, winner);
-  saveGame(player, world, playTime);
+  safeSaveGame();
 });
 
 // Reset / New Game Button
@@ -494,7 +517,7 @@ function handleStations(dt: number): boolean {
     uiManager.onLeaveShopPad();
     if (wasOpen) {
       uiManager.hideShop();
-      saveGame(player, world, playTime);
+      safeSaveGame();
     }
   }
 
@@ -536,7 +559,7 @@ function gameLoop(now: number) {
   autoSaveTimer += deltaTime;
   if (autoSaveTimer >= 5.0) {
     autoSaveTimer = 0;
-    saveGame(player, world, playTime);
+    safeSaveGame();
   }
 
   // 1. Station Mechanics & Tow Check
@@ -585,5 +608,5 @@ function gameLoop(now: number) {
 
 // Start
 requestAnimationFrame(gameLoop);
-console.log('POLYMINER FAZ 6: Headlight, Pulse Ores, Mini-Radar, 120m Ancient Core & Autosave System Active.');
+console.log('POLYMINER v2.0: Subterranean Mining, Elevators, Museum Relics & P2P Co-op Active.');
 
