@@ -4,6 +4,7 @@ import { ORE_DEFINITIONS } from './constants';
 
 export const SAVE_KEY = 'polyminer_save_v1';
 export const SAVE_KEY_COOP = 'polyminer_save_coop_v1';
+export const CURRENT_SAVE_VERSION = 1;
 
 export type SaveSlot = 'solo' | 'coop';
 
@@ -84,7 +85,7 @@ export function saveGame(
     const compactGrid = serializeWorld(world);
 
     const saveData: SaveData = {
-      version: 1,
+      version: CURRENT_SAVE_VERSION,
       timestamp: Date.now(),
       playTime,
       hasWon: !!player.hasWon,
@@ -120,17 +121,66 @@ export function saveGame(
 }
 
 /**
+ * Migrates older or unversioned save files to the latest schema version.
+ */
+export function migrateSaveData(raw: unknown): SaveData | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const d = raw as any;
+
+  if (!d.grid || !Array.isArray(d.grid) || !d.player || typeof d.player !== 'object') {
+    return null;
+  }
+
+  const p = d.player;
+  const migratedPlayer: SaveData['player'] = {
+    x: typeof p.x === 'number' ? p.x : 0,
+    y: typeof p.y === 'number' ? p.y : 0,
+    fuel: typeof p.fuel === 'number' ? p.fuel : 100,
+    maxFuel: typeof p.maxFuel === 'number' ? p.maxFuel : 100,
+    hull: typeof p.hull === 'number' ? p.hull : 100,
+    maxHull: typeof p.maxHull === 'number' ? p.maxHull : 100,
+    cargo: Array.isArray(p.cargo) ? p.cargo.filter((c: any) => typeof c === 'string') : [],
+    maxCargo: typeof p.maxCargo === 'number' ? p.maxCargo : 10,
+    money: typeof p.money === 'number' && Number.isFinite(p.money) ? Math.max(0, Math.floor(p.money)) : 0,
+    drillSpeed: typeof p.drillSpeed === 'number' ? p.drillSpeed : 1.25,
+    thrusterPower: typeof p.thrusterPower === 'number' ? p.thrusterPower : 1500,
+    radarRadius: typeof p.radarRadius === 'number' ? p.radarRadius : 2.5,
+    upgrades: p.upgrades && typeof p.upgrades === 'object' ? p.upgrades : {
+      drill: 1, fuelTank: 1, cargo: 1, engine: 1, radar: 1, hull: 1, radiator: 1
+    },
+    inventory: p.inventory && typeof p.inventory === 'object' ? p.inventory : {
+      fuelCanister: 0, repairKit: 0, teleporter: 0, dynamite: 0, elevatorRails: 0
+    },
+    temperature: typeof p.temperature === 'number' ? p.temperature : 24,
+    heat: typeof p.heat === 'number' ? Math.round(p.heat) : 0,
+    discoveredRelics: Array.isArray(p.discoveredRelics) ? p.discoveredRelics.filter((r: any) => typeof r === 'string') : [],
+    museumRewardClaimed: !!p.museumRewardClaimed
+  };
+
+  return {
+    version: CURRENT_SAVE_VERSION,
+    timestamp: typeof d.timestamp === 'number' ? d.timestamp : Date.now(),
+    playTime: typeof d.playTime === 'number' ? d.playTime : 0,
+    hasWon: !!d.hasWon,
+    player: migratedPlayer,
+    grid: d.grid
+  };
+}
+
+/**
  * Attempts to load saved game from localStorage.
  */
 export function loadGame(slot: SaveSlot = 'solo'): SaveData | null {
   try {
     const raw = localStorage.getItem(getSaveKey(slot));
     if (!raw) return null;
-    const data = JSON.parse(raw) as SaveData;
-    if (!data || data.version !== 1 || !data.grid || !data.player) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
       return null;
     }
-    return data;
+    return migrateSaveData(parsed);
   } catch (err) {
     console.error(`[POLYMINER] Load save error (${slot}):`, err);
     return null;
