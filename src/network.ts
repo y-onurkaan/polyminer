@@ -123,6 +123,7 @@ export class NetworkManager {
   public localColor: string = '#00f2fe';
   public isConnected: boolean = false;
   private lastStateBroadcast: number = 0;
+  private victoryDeclared: boolean = false;
 
   public getLocalId(): string | null {
     return this.peer?.id ?? null;
@@ -303,6 +304,7 @@ export class NetworkManager {
     this.isConnected = false;
     this.roomCode = null;
     this.isHost = false;
+    this.victoryDeclared = false;
     this.connections.clear();
     this.hostConn = null;
     this.roster.clear();
@@ -589,21 +591,31 @@ export class NetworkManager {
       case 'VICTORY_EVENT': {
         const p = packet.payload;
         if (!p || typeof p !== 'object') break;
-        const rosterEntry = this.roster.get(sourceConn.peer);
-        const safeWinner = this.isHost
-          ? (rosterEntry?.name || 'Bir Madenci')
-          : sanitizeName(p.winnerName, 'Bir Madenci');
 
-        const validatedVictory = {
-          winnerName: safeWinner
-        };
-
-        this.callbacks.onVictory?.(validatedVictory);
         if (this.isHost) {
+          // Host allows only ONE victory event per room session
+          if (this.victoryDeclared) break;
+          this.victoryDeclared = true;
+
+          const rosterEntry = this.roster.get(sourceConn.peer);
+          const safeWinner = rosterEntry?.name || 'Bir Madenci';
+
+          const validatedVictory = {
+            winnerName: safeWinner
+          };
+
+          this.callbacks.onVictory?.(validatedVictory);
           this.broadcast({
             type: 'VICTORY_EVENT',
             payload: validatedVictory
-          }, sourceConn.peer);
+          });
+        } else {
+          // Client accepts victory event once from Host connection
+          if (this.victoryDeclared) break;
+          this.victoryDeclared = true;
+
+          const safeWinner = sanitizeName(p.winnerName, 'Bir Madenci');
+          this.callbacks.onVictory?.({ winnerName: safeWinner });
         }
         break;
       }
@@ -755,13 +767,17 @@ export class NetworkManager {
 
   /**
    * Broadcast ancient core victory event to all players.
+   * Locked to once per room session.
    */
   public broadcastVictory(winnerName: string) {
-    if (!this.isConnected) return;
+    if (!this.isConnected || this.victoryDeclared) return;
+    this.victoryDeclared = true;
+
+    const safeWinner = this.isHost ? sanitizeName(winnerName, this.localName) : this.localName;
     this.broadcast({
       type: 'VICTORY_EVENT',
       payload: {
-        winnerName
+        winnerName: safeWinner
       }
     });
   }
