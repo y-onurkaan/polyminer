@@ -40,7 +40,11 @@ Madenler düzgün çokgen olarak çizilir. **Kenar sayısı arttıkça değeri a
 2. Kullanıcı adını ve Mecha Pod şasi rengini seç.
 3. **Oda Kur (Host):** Tek tıkla `POLY-XXXX` oda kodu üret ve arkadaşına gönder.
 4. **Odaya Katıl (Misafir):** Arkadaşından aldığın kodu girip bağlan.
-   * *Not:* P2P WebRTC ile tarayıcıdan tarayıcıya doğrudan iletişim kurulur. Misafir olarak oynarken solo maden kaydın korunur; odadan ayrıldığında kendi madenine hasarsız dönersin.
+
+### Ağ ve Kayıt Mimarisi
+- **P2P WebRTC:** Tarayıcılar arasında doğrudan eşler arası (PeerJS genel sunucusu üzerinden sinyalleşme ile) iletişim kurulur. TURN röle sunucusu bulunmadığından katı simetrik NAT/kurumsal güvenlik duvarı arkasındaki bazı ağlarda doğrudan bağlantı kurulamayabilir.
+- **Host-Otoriter Ortak Kasa:** Tüm harcama ve maden satışları delta (`changeAmount`) olarak Host'a iletilir ve Host tarafından merkezi olarak doğrulanıp tekil bakiye olarak tüm oyunculara yayınlanır; eşzamanlı satışlarda para kaybı yaşanmaz.
+- **Ayrı Kayıt Slotu:** Misafir olarak oynarken ilerleme `polyminer_save_coop_v1` slotuna yazılır; ana solo maden kaydın (`polyminer_save_v1`) kesinlikle korunur. Odadan ayrıldığında veya bağlantı koptuğunda kendi madenine temizce dönersin.
 
 ## Kontroller
 

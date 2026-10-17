@@ -34,7 +34,7 @@ Güncel sayısal değerler için kaynak olarak bu dosya esastır.
 | `effects.ts` | Yüzen hasar/para yazıları ve çarpma şok dalgaları |
 | `renderer.ts` | Dünya, oyuncu, çokgenler, sol kenar derinlik mini-radarı ve uzak oyuncuların çizimi |
 | `ui.ts` | HUD, dükkân, geliştirmeler (`UPGRADES`), müze, Co-op lobi/roster, yardım paneli (`UIManager`) |
-| `save.ts` | `localStorage` kaydı / yüklemesi (`polyminer_save_v1`) |
+| `save.ts` | Çoklu slot `localStorage` kaydı / yüklemesi (`polyminer_save_v1`, `polyminer_save_coop_v1`), şema sürümü ve migrasyon |
 | `audio.ts` | Web Audio ile ses motoru (`SoundEngine`) |
 
 `index.html` stilleri, HUD ve panel iskeletini içerir.
@@ -43,11 +43,19 @@ Güncel sayısal değerler için kaynak olarak bu dosya esastır.
 1. `main.ts` her karede girdiyi toplar ve `updatePlayer` ile oyuncuyu günceller.
 2. `player.ts`, `world.ts` içindeki `Tile[][]` gridi üzerinde çarpışma ve kazı yapar. Kazılan bloklar kargoya veya envantere işlenir.
 3. `network.ts`:
-   - Host `POLY-XXXX` oda kodu ile PeerJS sunucusuna kaydolur. Misafirler host'a doğrudan WebRTC DataChannel ile bağlanır (Host hub topolojisi).
-   - 20 Hz durum yayını (`PLAYER_STATE`), anlık blok/ray kazısı (`TILE_UPDATE`), ortak şirket kasası (`SHARED_WALLET_UPDATE`) ve fosil keşfi (`SHARED_RELIC_UPDATE`) senkronize edilir.
-   - **Ağ Güvenliği & Bütünlüğü:** Tüm gelen paketler doğrulanır (`clamp`, `isFiniteNum`, `isInt`), isim ve renkler HTML injection/XSS'e karşı arındırılır (`sanitizeName`, `sanitizeColor`, `escapeHtml`). Host, gelen oyuncu durumlarında sahte kimlik kullanımını önlemek için peer ID'yi otoriter olarak yazar.
-4. `save.ts`: Solo oyunda ve Host modunda periyodik olarak kaydedilir. **Misafir modundayken solo kaydın ezilmemesi için autosave kilitlenir**; misafir odadan ayrıldığında temiz bir yenilemeyle kendi solo madenine döner.
+   - Host `POLY-XXXX` oda kodu ile PeerJS sunucusuna kaydolur. Misafirler host'a doğrudan WebRTC DataChannel ile bağlanır (Host-star/hub topolojisi).
+   - 20 Hz durum yayını (`PLAYER_STATE`), anlık blok/ray kazısı (`TILE_UPDATE`), ortak şirket kasası (`WALLET_DELTA_REQUEST` → `SHARED_WALLET_UPDATE`), fosil keşfi (`SHARED_RELIC_UPDATE`) ve zafer ekranı (`VICTORY_EVENT`) senkronize edilir.
+   - **Ağ Güvenliği & Bütünlüğü:**
+     - **Host-Otoriter Kasa:** İstemciler bakiye değeri gönderemez, yalnızca `{ changeAmount, reason }` deltasını talep eder. Host deltayı sınırlar (`|delta| <= 1e7`), harcamada eksiye düşmeyi engeller ve yeni toplamı otoriter olarak tüm odaya dağıtır.
+     - **Paket Doğrulama:** Koordinat (`clamp`), hız, matkap kademesi, para ve fosil verileri sıkı tip denetiminden geçer (`isInt`, `isFiniteNum`, `isValidTileType`).
+     - **Harita Bütünlüğü:** `WELCOME_SYNC` paketi 280x24 boyut, geçerli hücre yapısı, kayıtlı cevher ve fosil anahtarları açısından `isValidSavedGrid` ile tam taranır; bozuk veriler haritayı bozmadan düşürülür.
+     - **Zafer Kilidi:** Oda oturumu boyunca yalnızca ilk `VICTORY_EVENT` işleme alınır ve Host tarafından otoriter kazanan ismiyle yayınlanır.
+     - **XSS & Kimlik Koruması:** İsim ve renkler `sanitizeName` ve `sanitizeColor` ile HTML tag/kontrol karakterlerinden arındırılır; Host, gelen durumlarda sahte kimlik kullanımını önlemek için peer ID'yi doğrular.
+4. `save.ts`:
+   - **Solo Slot:** `polyminer_save_v1` (varsayılan ve solo oyun için ayrılmış ana kayıt).
+   - **Co-op Slot:** `polyminer_save_coop_v1` (misafir modundayken solo kaydın ezilmesini mutlak olarak önleyen izole slot).
+   - **Şema & Migrasyon:** Kayıtlar `CURRENT_SAVE_VERSION` ile sürümlenir; `migrateSaveData` eksik alanları güvenle doldurur ve bozuk JSON hatalarını yakalar.
 
 ## 5. Notlar
-- Dünya her oyunda üretilir. Kaydedilen kazı ve keşif durumu `save.ts` ile geri uygulanır.
-- Kayıt anahtarı `polyminer_save_v1`'dir.
+- Dünya her oyunda tohumlanır veya Host'tan `WELCOME_SYNC` ile alınır.
+- `vitest run` ile saf doğrulayıcılar, XSS vektörleri ve kayıt migrasyonu CI üzerinde otomatik test edilir.

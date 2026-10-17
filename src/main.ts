@@ -622,5 +622,5 @@ function gameLoop(now: number) {
 
 // Start
 requestAnimationFrame(gameLoop);
-console.log('POLYMINER v2.0: Subterranean Mining, Elevators, Museum Relics & P2P Co-op Active.');
+console.log('POLYMINER v2.1: Host-Authoritative Co-op, Dedicated Save Slots, Automated CI/Tests Active.');
 
