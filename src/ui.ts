@@ -1380,8 +1380,21 @@ export class UIManager {
       const swatch = document.createElement('div');
       swatch.className = `color-swatch ${this.networkManager.localColor === color.hex ? 'active' : ''}`;
       swatch.style.backgroundColor = color.hex;
-      swatch.title = `${color.name} (${color.emoji})`;
-      swatch.innerHTML = `<span style="font-size:12px; pointer-events:none;">${color.emoji}</span>`;
+      swatch.title = `${color.name} Şasi`;
+      swatch.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; pointer-events:none;">
+          <!-- Drill Collar -->
+          <rect x="5" y="2" width="10" height="2.2" rx="0.5" fill="#0f172a" />
+          <!-- Conical Drill Bit -->
+          <path d="M 5 4.2 L 15 4.2 L 10 17.8 Z" fill="#0f172a" stroke="#0f172a" stroke-width="0.4" stroke-linejoin="round" />
+          <!-- Spiral Grooves (White/Silver highlights like in-game) -->
+          <path d="M 6.2 7 L 13.8 8.2" stroke="#f8fafc" stroke-width="1.15" stroke-linecap="round" />
+          <path d="M 7.2 10.2 L 12.8 11.4" stroke="#f8fafc" stroke-width="1.15" stroke-linecap="round" />
+          <path d="M 8.2 13.4 L 11.8 14.4" stroke="#f8fafc" stroke-width="1.15" stroke-linecap="round" />
+          <!-- Tip Glint -->
+          <circle cx="10" cy="17.2" r="0.75" fill="#ffffff" />
+        </svg>
+      `;
 
       swatch.addEventListener('click', () => {
         if (!this.networkManager) return;
@@ -1391,7 +1404,7 @@ export class UIManager {
         const all = this.coopColorSelector?.querySelectorAll('.color-swatch');
         all?.forEach(s => s.classList.remove('active'));
         swatch.classList.add('active');
-        this.showToast(`🎨 Şasi Rengi: ${color.name}`, color.hex, 1800);
+        this.showToast(`🛠️ Şasi Rengi: ${color.name}`, color.hex, 1800);
       });
 
       this.coopColorSelector.appendChild(swatch);

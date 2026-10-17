@@ -118,15 +118,14 @@ export interface ChassisColor {
   id: string;
   name: string;
   hex: string;
-  emoji: string;
 }
 
 export const CHASSIS_COLORS: ChassisColor[] = [
-  { id: 'cyan', name: 'Siyan', hex: '#00f2fe', emoji: '🩵' },
-  { id: 'orange', name: 'Turuncu', hex: '#ff7b00', emoji: '🧡' },
-  { id: 'green', name: 'Neon Yeşil', hex: '#10b981', emoji: '💚' },
-  { id: 'purple', name: 'Kozmik Mor', hex: '#a855f7', emoji: '💜' },
-  { id: 'red', name: 'Kızıl', hex: '#ef4444', emoji: '❤️' }
+  { id: 'cyan', name: 'Siyan', hex: '#00f2fe' },
+  { id: 'orange', name: 'Turuncu', hex: '#ff7b00' },
+  { id: 'green', name: 'Neon Yeşil', hex: '#10b981' },
+  { id: 'purple', name: 'Kozmik Mor', hex: '#a855f7' },
+  { id: 'red', name: 'Kızıl', hex: '#ef4444' }
 ];
 
 export interface RemotePlayerState {
