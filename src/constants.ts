@@ -14,8 +14,7 @@ export const FALL_DAMAGE_FACTOR = 0.33; // damage per px/s above threshold (2 bl
 export const DEEP_FALL_THRESHOLD_SPEED = 165; // px/s excess (speed reached after falling 3+ blocks / 144px)
 export const DEEP_FALL_PENALTY_MULTIPLIER = 1.20; // +20% damage penalty for falls from 3 blocks and deeper
 
-// Rock Mining Requirements
-export const ROCK_MIN_DRILL_LEVEL = 4;
+// Rock Hardness
 export const ROCK_HARDNESS = 5.0;
 
 // Geologic Biome Configurations
@@ -263,7 +262,7 @@ export const RELIC_DEFINITIONS: Record<string, RelicDefinition> = {
     icon: '💠',
     color: '#ec4899',
     description: 'Gezegenin çekirdeğinden kopmuş mutlak ısı emici kristal parçası.',
-    buffLabel: '+50°C Radyatör Isı Toleransı'
+    buffLabel: '-%20 Hararet & +15 Soğuma Hızı'
   }
 };
 

@@ -3,6 +3,8 @@ import { TILE_SIZE, ROCK_HARDNESS } from './constants';
 import { PlayerExtendedState, getDamageReductionFactor, PLAYER_WIDTH, PLAYER_HEIGHT, GRAVITY } from './player';
 import { sounds } from './audio';
 import { addFloatingText, addShockwave } from './effects';
+import { markWorldDirty } from './world';
+import { emitGameEvent } from './events';
 
 let nextBoulderId = 1;
 export const activeBoulders: FallingBoulder[] = [];
@@ -12,11 +14,7 @@ export function resetBoulders(): void {
 }
 
 function emitBoulderTileChange(gx: number, gy: number, tileType: TileType): void {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
-      detail: { gx, gy, tileType }
-    }));
-  }
+  emitGameEvent('polyminer:tile-changed', { gx, gy, tileType });
 }
 
 function settleBoulderAt(
@@ -31,6 +29,7 @@ function settleBoulderAt(
       revealed: true,
       ...(b.relicId ? { relicId: b.relicId } : {})
     };
+    markWorldDirty();
     sounds.playImpactSound(70);
     addShockwave(b.x + TILE_SIZE / 2, settleRow * TILE_SIZE + TILE_SIZE / 2, 28);
     emitBoulderTileChange(b.gx, settleRow, TileType.ROCK);
@@ -63,6 +62,7 @@ export function checkAndTriggerFallingRock(world: Tile[][], gx: number, gy: numb
     hardness: 0,
     revealed: tileAbove.revealed ?? true
   };
+  markWorldDirty();
   emitBoulderTileChange(gx, aboveGy, TileType.EMPTY);
 
   activeBoulders.push({

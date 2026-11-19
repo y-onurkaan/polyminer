@@ -9,11 +9,19 @@ import {
   ROCK_HARDNESS,
   getUpgradeLevelValue
 } from './constants';
-import { createEmptyWorld, generateWorld, computeTileHardness } from './world';
+import {
+  createEmptyWorld,
+  generateWorld,
+  computeTileHardness,
+  revealTilesAround,
+  revealAdjacentTiles,
+  getWorldRenderVersion
+} from './world';
 import {
   createPlayer,
   updatePlayer,
   canDrillBlock,
+  getBlockTier,
   buyConsumableItem,
   useConsumableItem,
   detonateDynamite,
@@ -29,6 +37,7 @@ import {
   updateBoulders
 } from './boulders';
 import { serializeWorld, applySavedGrid, migrateSaveData, applyLoadedGame } from './save';
+import { emitGameEvent, onGameEvent } from './events';
 
 describe('Polyminer Faz A Core Gameplay & Stabilization Tests', () => {
   beforeEach(() => {
@@ -381,5 +390,164 @@ describe('Polyminer Faz A Core Gameplay & Stabilization Tests', () => {
       expect(player.fuel).toBeGreaterThan(0);
       expect(player.hull).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('Polyminer Faz B Architecture, Cache & Tier Tests', () => {
+  beforeEach(() => {
+    resetBoulders();
+    vi.restoreAllMocks();
+  });
+
+  it('tracks worldRenderVersion only on actual mutations and reveals', () => {
+    const v0 = getWorldRenderVersion();
+    generateWorld();
+    const vAfterGen = getWorldRenderVersion();
+    expect(vAfterGen).toBeGreaterThan(v0);
+
+    const world = createEmptyWorld();
+    world[20][10].revealed = false;
+    world[20][11].revealed = false;
+
+    const vBeforeReveal = getWorldRenderVersion();
+    const px = 10 * TILE_SIZE + TILE_SIZE / 2;
+    const py = 20 * TILE_SIZE + TILE_SIZE / 2;
+    revealTilesAround(world, px, py, 1, TILE_SIZE);
+    const vAfterReveal = getWorldRenderVersion();
+    expect(vAfterReveal).toBeGreaterThan(vBeforeReveal);
+
+    // Repeating reveal on already-revealed tiles does not bump version
+    revealTilesAround(world, px, py, 1, TILE_SIZE);
+    expect(getWorldRenderVersion()).toBe(vAfterReveal);
+
+    // Adjacent reveal bumps once when neighbors are hidden, then stays stable
+    world[29][15].revealed = false;
+    world[30][15].revealed = false;
+    world[31][15].revealed = false;
+    world[30][14].revealed = false;
+    world[30][16].revealed = false;
+    revealAdjacentTiles(world, 15, 30);
+    const vAfterAdj = getWorldRenderVersion();
+    expect(vAfterAdj).toBeGreaterThan(vAfterReveal);
+    revealAdjacentTiles(world, 15, 30);
+    expect(getWorldRenderVersion()).toBe(vAfterAdj);
+
+    // applySavedGrid marks dirty
+    applySavedGrid(serializeWorld(world), world);
+    const vAfterApply = getWorldRenderVersion();
+    expect(vAfterApply).toBeGreaterThan(vAfterAdj);
+
+    // Falling boulder detach and settle mark dirty
+    const bWorld = createEmptyWorld();
+    bWorld[10][5] = { type: TileType.ROCK, hardness: ROCK_HARDNESS, revealed: true };
+    bWorld[12][5] = { type: TileType.DIRT, hardness: 1.0, revealed: true };
+    const bPlayer = createPlayer();
+    bPlayer.x = 0;
+    bPlayer.y = 0;
+
+    const vBeforeDetach = getWorldRenderVersion();
+    checkAndTriggerFallingRock(bWorld, 5, 11);
+    const vAfterDetach = getWorldRenderVersion();
+    expect(vAfterDetach).toBeGreaterThan(vBeforeDetach);
+
+    updateBoulders(0.5, bWorld, bPlayer);
+    for (let i = 0; i < 40 && activeBoulders.length > 0; i++) {
+      updateBoulders(0.03, bWorld, bPlayer);
+    }
+    expect(activeBoulders.length).toBe(0);
+    expect(getWorldRenderVersion()).toBeGreaterThan(vAfterDetach);
+  });
+
+  it('safely no-ops typed events without window and delivers payloads when window exists', () => {
+    expect(typeof window).toBe('undefined');
+    const unsubNoop = onGameEvent('polyminer:tile-changed', () => {});
+    expect(() =>
+      emitGameEvent('polyminer:tile-changed', { gx: 3, gy: 4, tileType: TileType.EMPTY })
+    ).not.toThrow();
+    unsubNoop();
+
+    (globalThis as Record<string, unknown>).window = new EventTarget();
+    try {
+      const receivedWallets: Array<{ changeAmount: number; reason: string }> = [];
+      let claimCalls = 0;
+
+      const offWallet = onGameEvent('polyminer:wallet-changed', (detail) => {
+        receivedWallets.push({ changeAmount: detail.changeAmount, reason: detail.reason });
+      });
+      const offClaim = onGameEvent('polyminer:museum-claim', () => {
+        claimCalls++;
+      });
+
+      emitGameEvent('polyminer:wallet-changed', {
+        newMoney: 750,
+        changeAmount: 250,
+        reason: 'Test Kazanç'
+      });
+      emitGameEvent('polyminer:museum-claim');
+
+      expect(receivedWallets).toEqual([{ changeAmount: 250, reason: 'Test Kazanç' }]);
+      expect(claimCalls).toBe(1);
+
+      offWallet();
+      offClaim();
+
+      emitGameEvent('polyminer:wallet-changed', {
+        newMoney: 800,
+        changeAmount: 50,
+        reason: 'Unsubscribed'
+      });
+      emitGameEvent('polyminer:museum-claim');
+      expect(receivedWallets.length).toBe(1);
+      expect(claimCalls).toBe(1);
+    } finally {
+      delete (globalThis as Record<string, unknown>).window;
+    }
+  });
+
+  it('migrates and loads legacy saves containing deprecated temperature field', () => {
+    const world = createEmptyWorld();
+    const legacyWithTemp = {
+      version: 1,
+      player: {
+        x: 120,
+        y: 144,
+        money: 500,
+        temperature: 145
+      },
+      grid: serializeWorld(world)
+    };
+
+    const migrated = migrateSaveData(legacyWithTemp);
+    expect(migrated).not.toBeNull();
+    expect('temperature' in (migrated!.player as Record<string, unknown>)).toBe(false);
+
+    const player = createPlayer();
+    applyLoadedGame(migrated!, player, world);
+    expect(player.money).toBe(500);
+    expect('temperature' in (player as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it('enforces biome-based getBlockTier and canDrillBlock rules for ROCK', () => {
+    const rockTile: Tile = { type: TileType.ROCK, hardness: ROCK_HARDNESS, revealed: true };
+
+    // Biome 1 (Üst Kabuk, row 20 -> Tier 2): Drill 1 struggles (true), Drill 2 normal (true)
+    expect(getBlockTier(rockTile, 20)).toBe(2);
+    expect(canDrillBlock(rockTile, 1, 20)).toBe(true);
+    expect(canDrillBlock(rockTile, 2, 20)).toBe(true);
+
+    // Biome 2 (Kuvars Mağaraları, row 80 -> Tier 3): Drill 1 locked (false), Drill 2 struggles (true)
+    expect(getBlockTier(rockTile, 80)).toBe(3);
+    expect(canDrillBlock(rockTile, 1, 80)).toBe(false);
+    expect(canDrillBlock(rockTile, 2, 80)).toBe(true);
+
+    // Biome 3 (Bazalt & Gaz, row 150 -> Tier 4): Drill 2 locked (false), Drill 3 struggles (true)
+    expect(getBlockTier(rockTile, 150)).toBe(4);
+    expect(canDrillBlock(rockTile, 2, 150)).toBe(false);
+    expect(canDrillBlock(rockTile, 3, 150)).toBe(true);
+
+    // Biome 4 (Magma Çekirdeği, row 220 -> Tier 5): Drill 3 locked (false), Drill 4 struggles (true)
+    expect(getBlockTier(rockTile, 220)).toBe(5);
+    expect(canDrillBlock(rockTile, 3, 220)).toBe(false);
+    expect(canDrillBlock(rockTile, 4, 220)).toBe(true);
   });
 });

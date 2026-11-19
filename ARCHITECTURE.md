@@ -9,7 +9,7 @@
 ## 2. Temel Sabitler (`src/constants.ts`)
 - `TILE_SIZE = 48`, `GRID_WIDTH = 24`, `GRID_HEIGHT = 280`
 - `SURFACE_ROW = 3` (0-2 gökyüzü, 3 yüzey)
-- `ROCK_MIN_DRILL_LEVEL = 4`: kaya için en az matkap seviyesi
+- Katman bazlı blok kademesi (`getBlockTier`) ve `UPGRADES` tek kaynak tanımları: `ROCK` ve maden blokları biyom derinliğine göre matkap kademesi gerektirir; yükseltme/kapasite değerleri `UPGRADES` üzerinden türetilir
 - `SAFE_LANDING_SPEED = 250`, `FALL_DAMAGE_FACTOR = 0.33`: 1 blok (240 px/s) güvenli, 2 blok 30 HP
 - `DEEP_FALL_THRESHOLD_SPEED = 165`, `DEEP_FALL_PENALTY_MULTIPLIER = 1.20`: 3+ blok derin düşüşlerde +%20 hasar cezası
 - `MAX_FALL_SPEED = 760`: 10 blokluk uçurum terminal hız tavanı
@@ -25,19 +25,21 @@ Güncel sayısal değerler için kaynak olarak bu dosya esastır.
 | Dosya | Sorumluluk |
 |---|---|
 | `main.ts` | Giriş noktası, oyun döngüsü, klavye ve dokunmatik girdi, güvenli kayıt (`safeSaveGame`) |
+| `events.ts` | Tip güvenli oyun içi olay veri yolu (`GameEventMap`, `emitGameEvent`, `onGameEvent`) |
 | `network.ts` | PeerJS P2P WebRTC oda yönetimi (`NetworkManager`), paket doğrulama, XSS arındırma, host otoritesi |
 | `types.ts` | `TileType`, `Tile`, `OreDefinition`, `RelicDefinition`, `PlayerState`, `RemotePlayerState` vb. |
-| `constants.ts` | Sabitler, biyomlar, maden / fosil / sarf tanımları, düşme hasarı katsayıları |
-| `world.ts` | Harita üretimi (`generateWorld`), sis açma (`revealTilesAround`), `getTile` |
-| `player.ts` | Fizik, matkap, yakıt/ısı/hasar, asansör rayı, dinamit, sandık, çekme ve ışınlanma (`updatePlayer`) |
+| `constants.ts` | Sabitler, biyomlar, maden / fosil / sarf tanımları, `UPGRADES`, düşme hasarı katsayıları |
+| `world.ts` | Harita üretimi (`generateWorld`), sis açma (`revealTilesAround`), `getTile`, offscreen mini-radar kirli sürüm takibi (`worldRenderVersion`, `markWorldDirty`) |
+| `player.ts` | Fizik, matkap, yakıt/hararet/hasar, asansör rayı, dinamit, sandık, çekme ve ışınlanma (`updatePlayer`) |
 | `boulders.ts` | Düşen heyelan kayaları |
 | `effects.ts` | Yüzen hasar/para yazıları ve çarpma şok dalgaları |
-| `renderer.ts` | Dünya, oyuncu, çokgenler, sol kenar derinlik mini-radarı ve uzak oyuncuların çizimi |
-| `ui.ts` | HUD, dükkân, geliştirmeler (`UPGRADES`), müze, Co-op lobi/roster, yardım paneli (`UIManager`) |
+| `renderer.ts` | Dünya, oyuncu, çokgenler, offscreen önbellekli mini-radar ve interpolasyonlu / ekran-dışı göstergeli uzak oyuncular |
+| `ui.ts` | Dirty-check önbellekli HUD, tıklanabilir sarf rozetleri, dükkân, geliştirmeler (`UPGRADES`), müze, Co-op lobi/roster, yardım paneli (`UIManager`) |
 | `save.ts` | Çoklu slot `localStorage` kaydı / yüklemesi (`polyminer_save_v1`, `polyminer_save_coop_v1`), şema sürümü ve migrasyon |
 | `audio.ts` | Web Audio ile ses motoru (`SoundEngine`) |
+| `style.css` | Ayrıştırılmış HUD, modal panelleri ve dokunmatik kontrol stilleri |
 
-`index.html` stilleri, HUD ve panel iskeletini içerir.
+`index.html` HUD ve panel HTML iskeletini içerir (`src/style.css`, `src/main.ts` üzerinden yüklenir).
 
 ## 4. Veri Akışı ve Ağ Mimarisi
 1. `main.ts` her karede girdiyi toplar ve `updatePlayer` ile oyuncuyu günceller.

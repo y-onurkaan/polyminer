@@ -1,7 +1,7 @@
 import { PlayerExtendedState } from './player';
 import { Tile, TileType } from './types';
 import { ORE_DEFINITIONS, getUpgradeLevelValue } from './constants';
-import { computeTileHardness } from './world';
+import { computeTileHardness, markWorldDirty } from './world';
 
 export const SAVE_KEY = 'polyminer_save_v1';
 export const SAVE_KEY_COOP = 'polyminer_save_coop_v1';
@@ -41,7 +41,6 @@ export interface SaveData {
     radarRadius: number;
     upgrades: PlayerExtendedState['upgrades'];
     inventory: PlayerExtendedState['inventory'];
-    temperature?: number;
     heat?: number;
     discoveredRelics?: string[];
     museumRewardClaimed?: boolean;
@@ -105,7 +104,6 @@ export function saveGame(
         radarRadius: player.radarRadius,
         upgrades: { ...player.upgrades },
         inventory: { ...player.inventory },
-        temperature: player.temperature,
         heat: Math.round(player.heat ?? 0),
         discoveredRelics: [...(player.discoveredRelics || [])],
         museumRewardClaimed: !!player.museumRewardClaimed
@@ -199,7 +197,6 @@ export function migrateSaveData(raw: unknown): SaveData | null {
     radarRadius,
     upgrades,
     inventory,
-    temperature: typeof p.temperature === 'number' && Number.isFinite(p.temperature) ? p.temperature : 24,
     heat: typeof p.heat === 'number' && Number.isFinite(p.heat) ? Math.max(0, Math.min(100, Math.round(p.heat))) : 0,
     discoveredRelics: Array.isArray(p.discoveredRelics) ? p.discoveredRelics.filter((r: any) => typeof r === 'string') : [],
     museumRewardClaimed: !!p.museumRewardClaimed
@@ -270,7 +267,6 @@ export function applyLoadedGame(
   player.fuel = Math.max(0, Math.min(player.maxFuel, saveData.player.fuel));
   player.hull = Math.max(0, Math.min(player.maxHull, saveData.player.hull));
 
-  player.temperature = saveData.player.temperature ?? 24;
   player.heat = Math.max(0, Math.min(100, saveData.player.heat ?? 0));
   player.maxHeat = 100;
   player.heatLockoutTimer = 0;
@@ -337,6 +333,7 @@ export function applySavedGrid(savedGrid: SavedTile[][], world: Tile[][]): void 
       targetTile.hardness = computeTileHardness(targetTile.type, y, targetTile.ore);
     }
   }
+  markWorldDirty();
 }
 
 /**

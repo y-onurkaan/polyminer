@@ -30,7 +30,6 @@ export interface OreDefinition {
   sides: number;      // 3 to 8
   color: string;
   value: number;
-  weight?: number;
   minDepth: number;
   hardness: number;
 }
@@ -104,7 +103,6 @@ export interface PlayerState {
   drillProgress: number;
   drillTarget: { gx: number; gy: number } | null;
   inventory: ConsumableInventory;
-  temperature: number;
   heat: number; // 0 to 100% active hararet
   maxHeat: number; // 100
   heatLockoutTimer: number; // > 0 means engine is overheated and locked out (2.5s)
@@ -136,6 +134,8 @@ export interface RemotePlayerState {
   color: string;
   x: number;
   y: number;
+  renderX?: number;
+  renderY?: number;
   vx: number;
   vy: number;
   facing: 'left' | 'right' | 'down' | 'up';

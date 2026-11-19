@@ -1,3 +1,4 @@
+import './style.css';
 import {
   GRID_WIDTH,
   GRID_HEIGHT,
@@ -7,7 +8,7 @@ import {
   ROCK_HARDNESS,
   MUSEUM_CURATOR_REWARD
 } from './constants';
-import { generateWorld, revealAdjacentTiles } from './world';
+import { generateWorld, revealAdjacentTiles, markWorldDirty } from './world';
 import { renderWorld, renderPlayer, renderRemotePlayers } from './renderer';
 import {
   createPlayer,
@@ -25,6 +26,7 @@ import { updateBoulders, renderBoulders } from './boulders';
 import { NetworkManager, MIN_SHARED_MONEY, MAX_SHARED_MONEY } from './network';
 import { RemotePlayerState, TileType } from './types';
 import { sounds } from './audio';
+import { emitGameEvent, onGameEvent } from './events';
 
 // Canvas Setup
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -104,7 +106,12 @@ const network = new NetworkManager({
     uiManager.showToast('🗺️ Host Haritası & Ortak Kasa Eşitlendi!', '#10b981');
   },
   onRemotePlayerUpdate: (rp) => {
-    remotePlayers.set(rp.id, rp);
+    const existing = remotePlayers.get(rp.id);
+    remotePlayers.set(rp.id, {
+      ...rp,
+      renderX: existing?.renderX ?? rp.x,
+      renderY: existing?.renderY ?? rp.y,
+    });
   },
   onRemotePlayerLeave: (id) => {
     const left = remotePlayers.get(id);
@@ -125,17 +132,20 @@ const network = new NetworkManager({
           delete tile.ore;
           tile.hardness = 0;
           revealAdjacentTiles(world, data.gx, data.gy);
+          markWorldDirty();
         } else if (data.tileType === TileType.EMPTY) {
           tile.type = TileType.EMPTY;
           delete tile.ore;
           tile.hardness = 0;
           tile.revealed = true;
           revealAdjacentTiles(world, data.gx, data.gy);
+          markWorldDirty();
         } else if (data.tileType === TileType.ROCK) {
           tile.type = TileType.ROCK;
           delete tile.ore;
           tile.hardness = ROCK_HARDNESS;
           tile.revealed = true;
+          markWorldDirty();
         }
       }
     }
@@ -231,7 +241,7 @@ function safeSaveGame(): boolean {
 }
 
 // Pre-save solo game before connecting to any remote host
-window.addEventListener('polyminer:pre-join', () => {
+onGameEvent('polyminer:pre-join', () => {
   saveGame(player, world, playTime);
 });
 
@@ -240,32 +250,33 @@ uiManager.setPlayerRef(player, () => {
   safeSaveGame();
 });
 
+uiManager.setConsumableClickHandler((itemKey) => {
+  if (!uiManager.isAnyModalOpen()) {
+    useConsumableItem(player, itemKey, world);
+  }
+});
+
 // Initialize Co-op Lobby in UI
 uiManager.initCoop(network);
 
 // Listen to Custom Game Events & Broadcast Over Network
-window.addEventListener('polyminer:tile-changed', (e: any) => {
-  const d = e.detail;
-  if (d) {
-    network.broadcastTileUpdate(d.gx, d.gy, d.tileType, d.hasElevator);
-  }
+onGameEvent('polyminer:tile-changed', (d) => {
+  network.broadcastTileUpdate(d.gx, d.gy, d.tileType, d.hasElevator);
 });
 
-window.addEventListener('polyminer:wallet-changed', (e: any) => {
-  const d = e.detail;
-  if (d && typeof d.changeAmount === 'number') {
+onGameEvent('polyminer:wallet-changed', (d) => {
+  if (typeof d.changeAmount === 'number') {
     network.sendWalletDelta(d.changeAmount, d.reason || 'Ortak İşlem', !!d.allowDebt);
   }
 });
 
-window.addEventListener('polyminer:relic-discovered', (e: any) => {
-  const d = e.detail;
-  if (d && d.relicId) {
+onGameEvent('polyminer:relic-discovered', (d) => {
+  if (d.relicId) {
     network.broadcastRelicDiscovered(d.relicId);
   }
 });
 
-window.addEventListener('polyminer:museum-claim', () => {
+onGameEvent('polyminer:museum-claim', () => {
   const status = network.requestMuseumRewardClaim();
   if (status === 'already_claimed') {
     player.museumRewardClaimed = true;
@@ -294,8 +305,8 @@ window.addEventListener('polyminer:museum-claim', () => {
 });
 
 // Victory Event Listener (When 550m Ancient Core is mined/blasted)
-window.addEventListener('polyminer:victory', (e: any) => {
-  const winner = e.detail?.winnerName || player.name || network.localName || 'Madenci';
+onGameEvent('polyminer:victory', (d) => {
+  const winner = d.winnerName || player.name || network.localName || 'Madenci';
   if (network.isConnected) {
     network.broadcastVictory(winner);
     uiManager.showVictory(playTime, player, winner);
@@ -583,24 +594,19 @@ function handleStations(dt: number): boolean {
       player.hull = Math.min(player.maxHull, player.hull + hpStep);
     }
 
-    // C. Rapid thermal cooling & Hararet instant reset
-    if (player.temperature > 22) {
-      player.temperature = Math.max(22, player.temperature - 65 * dt);
-    }
+    // C. Hararet instant reset
     player.heat = 0;
     player.heatLockoutTimer = 0;
   }
 
   // Batch-sync station expenses to Co-op shared wallet
   if (pendingStationSpend >= 10 || (!isRefueling && pendingStationSpend > 0)) {
-    window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-      detail: {
-        newMoney: player.money,
-        changeAmount: -pendingStationSpend,
-        reason: 'İstasyon İkmali',
-        allowDebt: true
-      }
-    }));
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: player.money,
+      changeAmount: -pendingStationSpend,
+      reason: 'İstasyon İkmali',
+      allowDebt: true
+    });
     pendingStationSpend = 0;
   }
 
@@ -695,7 +701,7 @@ function gameLoop(now: number) {
   // 4. Rendering (World, Dynamic Boulders, Remote Players, Local Player, then Floating Texts & Shockwaves)
   renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player, remotePlayers);
   renderBoulders(ctx, cameraY);
-  renderRemotePlayers(ctx, remotePlayers, cameraY);
+  renderRemotePlayers(ctx, remotePlayers, cameraY, canvas.height, deltaTime);
   renderPlayer(ctx, player, cameraY);
   renderEffects(ctx, cameraY);
 

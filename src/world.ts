@@ -10,6 +10,16 @@ import {
   RELIC_DEFINITIONS
 } from './constants';
 
+let worldRenderVersion = 1;
+
+export function getWorldRenderVersion(): number {
+  return worldRenderVersion;
+}
+
+export function markWorldDirty(): void {
+  worldRenderVersion++;
+}
+
 export function createEmptyWorld(): Tile[][] {
   const world: Tile[][] = [];
   for (let y = 0; y < GRID_HEIGHT; y++) {
@@ -304,6 +314,7 @@ export function generateWorld(): Tile[][] {
     }
   }
 
+  markWorldDirty();
   return world;
 }
 
@@ -326,6 +337,7 @@ export function revealTilesAround(
   const maxGy = Math.min(GRID_HEIGHT - 1, Math.ceil(centerGy + radiusTiles));
 
   const radiusSquared = radiusTiles * radiusTiles;
+  let changed = false;
 
   for (let gy = minGy; gy <= maxGy; gy++) {
     const row = world[gy];
@@ -338,8 +350,13 @@ export function revealTilesAround(
       const dy = (gy + 0.5) - centerGy;
       if (dx * dx + dy * dy <= radiusSquared) {
         tile.revealed = true;
+        changed = true;
       }
     }
+  }
+
+  if (changed) {
+    markWorldDirty();
   }
 }
 
@@ -354,10 +371,16 @@ export function revealAdjacentTiles(world: Tile[][], gx: number, gy: number): vo
     [gx + 1, gy]
   ];
 
+  let changed = false;
   for (const [nx, ny] of neighbors) {
-    if (world[ny] && world[ny][nx]) {
+    if (world[ny] && world[ny][nx] && !world[ny][nx].revealed) {
       world[ny][nx].revealed = true;
+      changed = true;
     }
+  }
+
+  if (changed) {
+    markWorldDirty();
   }
 }
 

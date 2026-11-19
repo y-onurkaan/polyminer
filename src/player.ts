@@ -14,10 +14,11 @@ import {
   RELIC_DEFINITIONS,
   getBiomeTier
 } from './constants';
-import { revealTilesAround, revealAdjacentTiles } from './world';
+import { revealTilesAround, revealAdjacentTiles, markWorldDirty } from './world';
 import { sounds } from './audio';
 import { addFloatingText, addShockwave } from './effects';
 import { checkAndTriggerFallingRock } from './boulders';
+import { emitGameEvent } from './events';
 
 export const PLAYER_WIDTH = 38;
 export const PLAYER_HEIGHT = 38;
@@ -98,7 +99,6 @@ export function createPlayer(): PlayerExtendedState {
       dynamite: 0,
       elevatorRails: 0
     },
-    temperature: 24,
     heat: 0,
     maxHeat: 100,
     heatLockoutTimer: 0,
@@ -136,11 +136,11 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
       '#f59e0b'
     );
     addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 35, '#f59e0b');
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: player.money, changeAmount: duplicateBonus, reason: `Çift Fosil (${def.name})` }
-      }));
-    }
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: player.money,
+      changeAmount: duplicateBonus,
+      reason: `Çift Fosil (${def.name})`
+    });
     return;
   }
 
@@ -156,12 +156,12 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
     def.color
   );
   addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 50, def.color);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('polyminer:relic-discovered', { detail: { relicId } }));
-    window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-      detail: { newMoney: player.money, changeAmount: firstFindBonus, reason: `${def.name} Keşfi` }
-    }));
-  }
+  emitGameEvent('polyminer:relic-discovered', { relicId });
+  emitGameEvent('polyminer:wallet-changed', {
+    newMoney: player.money,
+    changeAmount: firstFindBonus,
+    reason: `${def.name} Keşfi`
+  });
 }
 
 /**
@@ -217,19 +217,19 @@ export function deployElevatorRail(player: PlayerExtendedState, world: Tile[][])
 
   tile.hasElevator = true;
   player.inventory.elevatorRails--;
+  markWorldDirty();
   sounds.playElevatorDeploy();
   addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, '🔩 ASANSÖR RAYI KURULDU!', '#06b6d4');
   addShockwave(pMidGx * TILE_SIZE + TILE_SIZE / 2, pMidGy * TILE_SIZE + TILE_SIZE / 2, 28, '#06b6d4');
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
-      detail: { gx: pMidGx, gy: pMidGy, tileType: TileType.EMPTY, hasElevator: true }
-    }));
-  }
+  emitGameEvent('polyminer:tile-changed', {
+    gx: pMidGx,
+    gy: pMidGy,
+    tileType: TileType.EMPTY,
+    hasElevator: true
+  });
   return true;
 }
-
-// (Weight system removed in FAZ 9 for streamlined progression)
 
 /**
  * Calculates armor damage reduction multiplier based on hull upgrade level (1-5).
@@ -244,49 +244,26 @@ export function getDamageReductionFactor(hullLevel: number = 1): number {
 }
 
 /**
- * Computes ambient geothermal temperature (°C) based on subterranean depth.
- * Rows 3 - 60 (0 - 114m): 20°C - 38°C
- * Rows 61 - 130 (115 - 254m): 38°C - 80°C
- * Rows 131 - 205 (255 - 404m): 80°C - 160°C
- * Rows 206 - 280 (405 - 554m, Magma Core): 160°C - 340°C!
- */
-export function getAmbientTemperature(y: number): number {
-  const currentDepthRow = Math.max(0, (y / TILE_SIZE) - SURFACE_ROW);
-  if (currentDepthRow <= 0) return 22; // Surface ambient temperature
-
-  if (currentDepthRow <= 60) {
-    return 22 + (currentDepthRow / 60) * 16;
-  } else if (currentDepthRow <= 130) {
-    return 38 + ((currentDepthRow - 60) / 70) * 42;
-  } else if (currentDepthRow <= 205) {
-    return 80 + ((currentDepthRow - 130) / 75) * 80;
-  } else {
-    return 160 + ((currentDepthRow - 205) / 75) * 180;
-  }
-}
-
-/**
  * Active cooling rates and heat absorption resistance for Radiator tiers (1-5).
  */
 export function getRadiatorSpecs(level: number = 1): {
-  safeTemp: number;
   coolingRate: number;
   heatAbsorptionMult: number;
   name: string;
 } {
   switch (level) {
     case 1:
-      return { safeTemp: 55, coolingRate: 20, heatAbsorptionMult: 1.0, name: 'Standart Fan' };
+      return { coolingRate: 20, heatAbsorptionMult: 1.0, name: 'Standart Fan' };
     case 2:
-      return { safeTemp: 90, coolingRate: 28, heatAbsorptionMult: 0.90, name: 'Çift Sıvı Soğutma' };
+      return { coolingRate: 28, heatAbsorptionMult: 0.90, name: 'Çift Sıvı Soğutma' };
     case 3:
-      return { safeTemp: 155, coolingRate: 38, heatAbsorptionMult: 0.80, name: 'Termoelektrik Radyatör' };
+      return { coolingRate: 38, heatAbsorptionMult: 0.80, name: 'Termoelektrik Radyatör' };
     case 4:
-      return { safeTemp: 230, coolingRate: 50, heatAbsorptionMult: 0.70, name: 'Kriyojenik Kalkan' };
+      return { coolingRate: 50, heatAbsorptionMult: 0.70, name: 'Kriyojenik Kalkan' };
     case 5:
-      return { safeTemp: 350, coolingRate: 65, heatAbsorptionMult: 0.60, name: 'Plazma Isı Emici' };
+      return { coolingRate: 65, heatAbsorptionMult: 0.60, name: 'Plazma Isı Emici' };
     default:
-      return { safeTemp: 55, coolingRate: 20, heatAbsorptionMult: 1.0, name: 'Standart Fan' };
+      return { coolingRate: 20, heatAbsorptionMult: 1.0, name: 'Standart Fan' };
   }
 }
 
@@ -450,18 +427,21 @@ export function openChest(
   delete targetTile.ore;
   targetTile.hardness = 0;
   targetTile.revealed = true;
+  markWorldDirty();
 
   revealAdjacentTiles(world, gx, gy);
   checkAndTriggerFallingRock(world, gx, gy);
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-      detail: { newMoney: player.money, changeAmount: cashReward, reason: 'Terk Edilmiş Sandık' }
-    }));
-    window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
-      detail: { gx, gy, tileType: TileType.EMPTY }
-    }));
-  }
+  emitGameEvent('polyminer:wallet-changed', {
+    newMoney: player.money,
+    changeAmount: cashReward,
+    reason: 'Terk Edilmiş Sandık'
+  });
+  emitGameEvent('polyminer:tile-changed', {
+    gx,
+    gy,
+    tileType: TileType.EMPTY
+  });
 }
 
 /**
@@ -700,11 +680,11 @@ export function updatePlayer(
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, `-${damage} ISI HASARI!`, '#ef4444');
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 8, `+$${bonus} TERMAL KRİSTAL`, '#f59e0b');
         sounds.playSteamSizzle();
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-            detail: { newMoney: player.money, changeAmount: bonus, reason: 'Termal Kristal' }
-          }));
-        }
+        emitGameEvent('polyminer:wallet-changed', {
+          newMoney: player.money,
+          changeAmount: bonus,
+          reason: 'Termal Kristal'
+        });
       }
       // 4. Broken Hard Rock
       else if (targetTile!.type === TileType.ROCK) {
@@ -720,12 +700,12 @@ export function updatePlayer(
         sounds.playVictoryFanfare();
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 20, '🏆 KADİM ÇEKİRDEK FETHEDİLDİ! +$50,000', '#ec4899');
         player.hasWon = true;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('polyminer:victory', { detail: { winnerName: player.name || 'Madenci' } }));
-          window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-            detail: { newMoney: player.money, changeAmount: 50000, reason: 'Kadim Çekirdek Fethi' }
-          }));
-        }
+        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
+        emitGameEvent('polyminer:wallet-changed', {
+          newMoney: player.money,
+          changeAmount: 50000,
+          reason: 'Kadim Çekirdek Fethi'
+        });
       }
       // 6. ANCIENT CHEST / SUPPLY VAULT
       else if (targetTile!.type === TileType.CHEST) {
@@ -748,13 +728,10 @@ export function updatePlayer(
       delete targetTile!.ore;
       targetTile!.hardness = 0;
       targetTile!.revealed = true;
+      markWorldDirty();
       revealAdjacentTiles(world, gx, gy);
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
-          detail: { gx, gy, tileType: TileType.EMPTY }
-        }));
-      }
+      emitGameEvent('polyminer:tile-changed', { gx, gy, tileType: TileType.EMPTY });
 
       // Check if rock above is now unsupported and should fall!
       checkAndTriggerFallingRock(world, gx, gy);
@@ -863,8 +840,6 @@ export function updatePlayer(
       player.x = targetCenterX;
       player.vx = 0;
 
-      player.temperature = Math.max(22, player.temperature - 55 * dt);
-
       if (player.elevatorAuto === 'up') {
         player.vy = -elevatorSpeed;
 
@@ -931,8 +906,6 @@ export function updatePlayer(
         player.vy = 0; // Float / hover motionless
         sounds.stopElevatorHum();
       }
-
-      player.temperature = Math.max(22, player.temperature - 35 * dt);
     } else {
       sounds.stopElevatorHum();
 
@@ -1326,6 +1299,7 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
   const blastPxY = blastGy * TILE_SIZE + TILE_SIZE / 2;
 
   let collectedOreCount = 0;
+  let clearedAnyTile = false;
 
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -1377,12 +1351,12 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
           '#ec4899'
         );
         player.hasWon = true;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('polyminer:victory', { detail: { winnerName: player.name || 'Madenci' } }));
-          window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-            detail: { newMoney: player.money, changeAmount: 50000, reason: 'Kadim Çekirdek Fethi' }
-          }));
-        }
+        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
+        emitGameEvent('polyminer:wallet-changed', {
+          newMoney: player.money,
+          changeAmount: 50000,
+          reason: 'Kadim Çekirdek Fethi'
+        });
       }
 
       // Check for Rare Archaeological Relic discovery via dynamite!
@@ -1393,16 +1367,17 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
       delete tile.ore;
       tile.hardness = 0;
       tile.revealed = true;
+      clearedAnyTile = true;
 
       revealAdjacentTiles(world, gx, gy);
       checkAndTriggerFallingRock(world, gx, gy);
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
-          detail: { gx, gy, tileType: TileType.EMPTY }
-        }));
-      }
+      emitGameEvent('polyminer:tile-changed', { gx, gy, tileType: TileType.EMPTY });
     }
+  }
+
+  if (clearedAnyTile) {
+    markWorldDirty();
   }
 
   // Shockwave & Bass Explosion Audio

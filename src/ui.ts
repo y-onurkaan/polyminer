@@ -14,6 +14,7 @@ import {
 } from './constants';
 import { sounds } from './audio';
 import { addFloatingText } from './effects';
+import { emitGameEvent } from './events';
 
 export { UPGRADES, type UpgradeConfig, type OreRequirement };
 
@@ -41,13 +42,53 @@ export class UIManager {
   private moneyLabel: HTMLElement;
   private stationStatus: HTMLElement;
 
-  // Consumable Badges
+  // Consumable Badges & Cached Icon / Touch Elements
   private badgeFuel: HTMLElement;
   private badgeRepair: HTMLElement;
   private badgeTeleport: HTMLElement;
   private badgeDynamite: HTMLElement;
   private badgeRail: HTMLElement;
   private badgeMuseum: HTMLElement;
+
+  private badgeFuelIcon: HTMLElement | null = null;
+  private badgeRepairIcon: HTMLElement | null = null;
+  private badgeTeleportIcon: HTMLElement | null = null;
+  private badgeDynamiteIcon: HTMLElement | null = null;
+  private badgeRailIcon: HTMLElement | null = null;
+  private badgeMuseumIcon: HTMLElement | null = null;
+
+  private touchBadgeRail: HTMLElement | null = null;
+  private touchBadgeFuel: HTMLElement | null = null;
+  private touchBadgeRepair: HTMLElement | null = null;
+  private touchBadgeDyn: HTMLElement | null = null;
+  private touchBadgeTp: HTMLElement | null = null;
+
+  private lastHud: {
+    depthMeters?: number;
+    hullPct?: number;
+    hullRounded?: number;
+    maxHull?: number;
+    hullColor?: string;
+    fuelPct?: number;
+    fuelRounded?: number;
+    maxFuel?: number;
+    fuelColor?: string;
+    cargoLen?: number;
+    maxCargo?: number;
+    cargoColor?: string;
+    moneyText?: string;
+    isDebt?: boolean;
+    fuelCount?: number;
+    repairCount?: number;
+    tpCount?: number;
+    dynCount?: number;
+    railCount?: number;
+    relicCount?: number;
+    stationStatusHtml?: string;
+    heatText?: string;
+    heatPct?: number;
+    heatColor?: string;
+  } = {};
 
   // Top Action Buttons
   private btnToggleSound: HTMLButtonElement;
@@ -114,6 +155,7 @@ export class UIManager {
 
   private playerRef: PlayerExtendedState | null = null;
   private onStateChange: (() => void) | null = null;
+  private onConsumableClick: ((itemKey: keyof ConsumableInventory) => void) | null = null;
 
   constructor() {
     this.depthDisplay = document.getElementById('top-depth') as HTMLElement;
@@ -134,6 +176,19 @@ export class UIManager {
     this.badgeDynamite = document.getElementById('badge-dynamite') as HTMLElement;
     this.badgeRail = document.getElementById('badge-rail') as HTMLElement;
     this.badgeMuseum = document.getElementById('badge-museum') as HTMLElement;
+
+    this.badgeFuelIcon = this.badgeFuel?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeRepairIcon = this.badgeRepair?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeTeleportIcon = this.badgeTeleport?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeDynamiteIcon = this.badgeDynamite?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeRailIcon = this.badgeRail?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeMuseumIcon = this.badgeMuseum?.querySelector('.hud-badge-icon') ?? null;
+
+    this.touchBadgeRail = document.getElementById('touch-badge-rail');
+    this.touchBadgeFuel = document.getElementById('touch-badge-fuel');
+    this.touchBadgeRepair = document.getElementById('touch-badge-repair');
+    this.touchBadgeDyn = document.getElementById('touch-badge-dyn');
+    this.touchBadgeTp = document.getElementById('touch-badge-tp');
 
     this.btnToggleSound = document.getElementById('btn-toggle-sound') as HTMLButtonElement;
     this.btnOpenHelp = document.getElementById('btn-open-help') as HTMLButtonElement;
@@ -193,7 +248,27 @@ export class UIManager {
     this.onStateChange = onStateChange;
   }
 
+  public setConsumableClickHandler(handler: (itemKey: keyof ConsumableInventory) => void) {
+    this.onConsumableClick = handler;
+  }
+
   private setupListeners() {
+    const clickableBadges: [HTMLElement | null, keyof ConsumableInventory][] = [
+      [this.badgeFuel, 'fuelCanister'],
+      [this.badgeRepair, 'repairKit'],
+      [this.badgeTeleport, 'teleporter'],
+      [this.badgeDynamite, 'dynamite'],
+      [this.badgeRail, 'elevatorRails']
+    ];
+    for (const [el, itemKey] of clickableBadges) {
+      if (el) {
+        el.addEventListener('click', () => {
+          if (!this.isAnyModalOpen() && this.onConsumableClick) {
+            this.onConsumableClick(itemKey);
+          }
+        });
+      }
+    }
     this.btnCloseShop.addEventListener('click', () => this.hideShop());
     if (this.btnCloseShopFooter) {
       this.btnCloseShopFooter.addEventListener('click', () => this.hideShop());
@@ -298,135 +373,186 @@ export class UIManager {
     });
   }
 
+  private syncConsumableBadge(
+    badgeEl: HTMLElement | null,
+    iconEl: HTMLElement | null,
+    touchEl: HTMLElement | null,
+    count: number,
+    prevCount: number | undefined,
+    emoji: string,
+    activeColor: string,
+    titleText: string
+  ): number {
+    if (count === prevCount) return count;
+    if (iconEl) iconEl.textContent = `${emoji} ${count}`;
+    if (badgeEl) {
+      badgeEl.title = titleText;
+      badgeEl.style.color = count > 0 ? activeColor : '#64748b';
+    }
+    if (touchEl) touchEl.textContent = `${count}`;
+    return count;
+  }
+
   public updateHUD(player: PlayerExtendedState, depthMeters: number, isRefueling: boolean) {
     // 1. Depth
-    this.depthDisplay.innerText = `${depthMeters}m`;
+    if (this.lastHud.depthMeters !== depthMeters) {
+      this.lastHud.depthMeters = depthMeters;
+      this.depthDisplay.innerText = `${depthMeters}m`;
+    }
 
     // 2. Hull Health
     const hullPct = Math.max(0, Math.min(100, Math.round((player.hull / player.maxHull) * 100)));
-    this.hullVal.innerText = `${hullPct}%`;
-    this.hullVal.title = `${Math.round(player.hull)} / ${player.maxHull} HP`;
-    this.hullBarFill.style.width = `${hullPct}%`;
-
-    if (hullPct <= 25) {
-      this.hullBarFill.style.backgroundColor = '#ef4444';
-    } else if (hullPct <= 55) {
-      this.hullBarFill.style.backgroundColor = '#f59e0b';
-    } else {
-      this.hullBarFill.style.backgroundColor = '#22c55e'; // Green
+    const hullRounded = Math.round(player.hull);
+    const hullColor = hullPct <= 25 ? '#ef4444' : hullPct <= 55 ? '#f59e0b' : '#22c55e';
+    if (this.lastHud.hullPct !== hullPct) {
+      this.lastHud.hullPct = hullPct;
+      this.hullVal.innerText = `${hullPct}%`;
+      this.hullBarFill.style.width = `${hullPct}%`;
+    }
+    if (this.lastHud.hullRounded !== hullRounded || this.lastHud.maxHull !== player.maxHull) {
+      this.lastHud.hullRounded = hullRounded;
+      this.lastHud.maxHull = player.maxHull;
+      this.hullVal.title = `${hullRounded} / ${player.maxHull} HP`;
+    }
+    if (this.lastHud.hullColor !== hullColor) {
+      this.lastHud.hullColor = hullColor;
+      this.hullBarFill.style.backgroundColor = hullColor;
     }
 
     // 3. Fuel
     const fuelPct = Math.max(0, Math.min(100, Math.round((player.fuel / player.maxFuel) * 100)));
-    this.fuelVal.innerText = `${fuelPct}%`;
-    this.fuelVal.title = `${Math.round(player.fuel)} / ${player.maxFuel} L`;
-    this.fuelBarFill.style.width = `${fuelPct}%`;
-
-    if (fuelPct <= 20) {
-      this.fuelBarFill.style.backgroundColor = '#ef4444';
-    } else if (fuelPct <= 45) {
-      this.fuelBarFill.style.backgroundColor = '#f59e0b';
-    } else {
-      this.fuelBarFill.style.backgroundColor = '#38bdf8';
+    const fuelRounded = Math.round(player.fuel);
+    const fuelColor = fuelPct <= 20 ? '#ef4444' : fuelPct <= 45 ? '#f59e0b' : '#38bdf8';
+    if (this.lastHud.fuelPct !== fuelPct) {
+      this.lastHud.fuelPct = fuelPct;
+      this.fuelVal.innerText = `${fuelPct}%`;
+      this.fuelBarFill.style.width = `${fuelPct}%`;
+    }
+    if (this.lastHud.fuelRounded !== fuelRounded || this.lastHud.maxFuel !== player.maxFuel) {
+      this.lastHud.fuelRounded = fuelRounded;
+      this.lastHud.maxFuel = player.maxFuel;
+      this.fuelVal.title = `${fuelRounded} / ${player.maxFuel} L`;
+    }
+    if (this.lastHud.fuelColor !== fuelColor) {
+      this.lastHud.fuelColor = fuelColor;
+      this.fuelBarFill.style.backgroundColor = fuelColor;
     }
 
     // 4. Cargo Count
-    this.cargoVal.innerText = `${player.cargo.length} / ${player.maxCargo}`;
-    if (player.cargo.length >= player.maxCargo) {
-      this.cargoVal.style.color = '#ef4444';
-    } else if (player.cargo.length >= player.maxCargo * 0.8) {
-      this.cargoVal.style.color = '#f59e0b';
-    } else {
-      this.cargoVal.style.color = '#f4f4f5';
+    const cargoLen = player.cargo.length;
+    const cargoColor = cargoLen >= player.maxCargo ? '#ef4444' : cargoLen >= player.maxCargo * 0.8 ? '#f59e0b' : '#f4f4f5';
+    if (this.lastHud.cargoLen !== cargoLen || this.lastHud.maxCargo !== player.maxCargo) {
+      this.lastHud.cargoLen = cargoLen;
+      this.lastHud.maxCargo = player.maxCargo;
+      this.cargoVal.innerText = `${cargoLen} / ${player.maxCargo}`;
+    }
+    if (this.lastHud.cargoColor !== cargoColor) {
+      this.lastHud.cargoColor = cargoColor;
+      this.cargoVal.style.color = cargoColor;
     }
 
     // 5. Money & Debt
-    const formatMoney = (val: number) => {
-      const rounded = Math.round(val * 100) / 100;
-      return Number.isInteger(rounded) ? rounded.toLocaleString() : rounded.toFixed(2);
-    };
+    const roundedMoney = Math.round(player.money * 100) / 100;
+    const absRounded = Math.abs(roundedMoney);
+    const formattedAbs = Number.isInteger(absRounded) ? absRounded.toLocaleString() : absRounded.toFixed(2);
+    const isDebt = player.money < 0;
+    const moneyText = isDebt ? `-$${formattedAbs}` : `$${formattedAbs}`;
 
-    if (player.money < 0) {
+    if (this.lastHud.isDebt !== isDebt) {
+      this.lastHud.isDebt = isDebt;
       if (this.moneyLabel) {
-        this.moneyLabel.innerText = '💳 BORÇ:';
-        this.moneyLabel.style.color = '#ef4444';
+        this.moneyLabel.innerText = isDebt ? '💳 BORÇ:' : '💰 BAKİYE:';
+        this.moneyLabel.style.color = isDebt ? '#ef4444' : '#94a3b8';
       }
-      this.moneyVal.innerText = `-$${formatMoney(Math.abs(player.money))}`;
-      this.moneyVal.style.color = '#ef4444';
-    } else {
-      if (this.moneyLabel) {
-        this.moneyLabel.innerText = '💰 BAKİYE:';
-        this.moneyLabel.style.color = '#94a3b8';
-      }
-      this.moneyVal.innerText = `$${formatMoney(player.money)}`;
-      this.moneyVal.style.color = '#facc15';
+      this.moneyVal.style.color = isDebt ? '#ef4444' : '#facc15';
+    }
+    if (this.lastHud.moneyText !== moneyText) {
+      this.lastHud.moneyText = moneyText;
+      this.moneyVal.innerText = moneyText;
     }
 
-    // 6. Consumable Items Badges (Compact Icon on top + Micro Explanation Underneath)
-    const fuelCount = player.inventory.fuelCanister;
-    this.badgeFuel.innerHTML = `<span class="hud-badge-icon">⛽ ${fuelCount}</span><span class="hud-badge-sub">Yakıt [R]</span>`;
-    this.badgeFuel.title = `Yedek Yakıt [R]: x${fuelCount} (Acil durumda yakıt ekler)`;
-    this.badgeFuel.style.color = fuelCount > 0 ? '#38bdf8' : '#64748b';
+    // 6. Consumable Items Badges & Mobile Touch Badges (Dirty-checked, zero innerHTML rebuild)
+    this.lastHud.fuelCount = this.syncConsumableBadge(
+      this.badgeFuel,
+      this.badgeFuelIcon,
+      this.touchBadgeFuel,
+      player.inventory.fuelCanister || 0,
+      this.lastHud.fuelCount,
+      '⛽',
+      '#38bdf8',
+      `Yedek Yakıt [R]: x${player.inventory.fuelCanister || 0} (Acil durumda yakıt ekler)`
+    );
+    this.lastHud.repairCount = this.syncConsumableBadge(
+      this.badgeRepair,
+      this.badgeRepairIcon,
+      this.touchBadgeRepair,
+      player.inventory.repairKit || 0,
+      this.lastHud.repairCount,
+      '🔧',
+      '#4ade80',
+      `Tamir Kiti [T]: x${player.inventory.repairKit || 0} (Gövdeyi 50 HP onarır ve harareti sıfırlar)`
+    );
+    this.lastHud.tpCount = this.syncConsumableBadge(
+      this.badgeTeleport,
+      this.badgeTeleportIcon,
+      this.touchBadgeTp,
+      player.inventory.teleporter || 0,
+      this.lastHud.tpCount,
+      '🌀',
+      '#38bdf8',
+      `Yüzeye Işınlayıcı [Q]: x${player.inventory.teleporter || 0} (Acil yüzeye ışınlanma)`
+    );
+    this.lastHud.dynCount = this.syncConsumableBadge(
+      this.badgeDynamite,
+      this.badgeDynamiteIcon,
+      this.touchBadgeDyn,
+      player.inventory.dynamite || 0,
+      this.lastHud.dynCount,
+      '💣',
+      '#facc15',
+      `Sismik Dinamit [X]: x${player.inventory.dynamite || 0} (Çevredeki kayaları patlatır)`
+    );
+    this.lastHud.railCount = this.syncConsumableBadge(
+      this.badgeRail,
+      this.badgeRailIcon,
+      this.touchBadgeRail,
+      player.inventory.elevatorRails || 0,
+      this.lastHud.railCount,
+      '🏗️',
+      '#06b6d4',
+      `Asansör Rayı [C]: x${player.inventory.elevatorRails || 0} (Dikey asansör hattı döşer)`
+    );
 
-    const repairCount = player.inventory.repairKit;
-    this.badgeRepair.innerHTML = `<span class="hud-badge-icon">🔧 ${repairCount}</span><span class="hud-badge-sub">Tamir [T]</span>`;
-    this.badgeRepair.title = `Tamir Kiti [T]: x${repairCount} (Gövdeyi 50 HP onarır)`;
-    this.badgeRepair.style.color = repairCount > 0 ? '#4ade80' : '#64748b';
-
-    const tpCount = player.inventory.teleporter;
-    this.badgeTeleport.innerHTML = `<span class="hud-badge-icon">🌀 ${tpCount}</span><span class="hud-badge-sub">Işınla [Q]</span>`;
-    this.badgeTeleport.title = `Yüzeye Işınlayıcı [Q]: x${tpCount} (Acil yüzeye ışınlanma)`;
-    this.badgeTeleport.style.color = tpCount > 0 ? '#38bdf8' : '#64748b';
-
-    const dynCount = player.inventory.dynamite;
-    this.badgeDynamite.innerHTML = `<span class="hud-badge-icon">💣 ${dynCount}</span><span class="hud-badge-sub">Dinamit [X]</span>`;
-    this.badgeDynamite.title = `Sismik Dinamit [X]: x${dynCount} (Çevredeki kayaları patlatır)`;
-    this.badgeDynamite.style.color = dynCount > 0 ? '#facc15' : '#64748b';
-
-    if (this.badgeRail) {
-      const railCount = player.inventory.elevatorRails || 0;
-      this.badgeRail.innerHTML = `<span class="hud-badge-icon">🏗️ ${railCount}</span><span class="hud-badge-sub">Asansör [C]</span>`;
-      this.badgeRail.title = `Asansör Rayı [C]: x${railCount} (Dikey asansör hattı döşer)`;
-      this.badgeRail.style.color = railCount > 0 ? '#06b6d4' : '#64748b';
+    const relicCount = player.discoveredRelics?.length || 0;
+    if (this.badgeMuseum && this.lastHud.relicCount !== relicCount) {
+      this.lastHud.relicCount = relicCount;
+      if (this.badgeMuseumIcon) this.badgeMuseumIcon.textContent = `🏛️ ${relicCount}/6`;
+      this.badgeMuseum.title = `Arkeoloji Müzesi & Fosiller: ${relicCount}/6 (Toplanan eserler)`;
+      this.badgeMuseum.style.color = relicCount > 0 ? '#f59e0b' : '#64748b';
     }
-
-    if (this.badgeMuseum) {
-      const found = player.discoveredRelics?.length || 0;
-      this.badgeMuseum.innerHTML = `<span class="hud-badge-icon">🏛️ ${found}/6</span><span class="hud-badge-sub">Fosil</span>`;
-      this.badgeMuseum.title = `Arkeoloji Müzesi & Fosiller: ${found}/6 (Toplanan eserler)`;
-      this.badgeMuseum.style.color = found > 0 ? '#f59e0b' : '#64748b';
-    }
-
-    // Mobile Virtual Gamepad Badges
-    const touchBadgeRail = document.getElementById('touch-badge-rail');
-    const touchBadgeFuel = document.getElementById('touch-badge-fuel');
-    const touchBadgeRepair = document.getElementById('touch-badge-repair');
-    const touchBadgeDyn = document.getElementById('touch-badge-dyn');
-    const touchBadgeTp = document.getElementById('touch-badge-tp');
-
-    if (touchBadgeRail) touchBadgeRail.innerText = `${player.inventory.elevatorRails || 0}`;
-    if (touchBadgeFuel) touchBadgeFuel.innerText = `${player.inventory.fuelCanister || 0}`;
-    if (touchBadgeRepair) touchBadgeRepair.innerText = `${player.inventory.repairKit || 0}`;
-    if (touchBadgeDyn) touchBadgeDyn.innerText = `${player.inventory.dynamite || 0}`;
-    if (touchBadgeTp) touchBadgeTp.innerText = `${player.inventory.teleporter || 0}`;
 
     // 7. Station & Elevator Status
+    let nextStatusHtml = '';
     if (player.elevatorAuto) {
-      this.stationStatus.style.display = 'block';
       const dirText = player.elevatorAuto === 'up' ? '▲ OTOMATİK ASANSÖR: YUKARI' : '▼ OTOMATİK ASANSÖR: AŞAĞI';
-      this.stationStatus.innerHTML = `<span style="color:#22d3ee; font-weight:bold; letter-spacing:0.5px;">⚡ ${dirText} · [Durdur: Boşluk / Ters Yön]</span>`;
+      nextStatusHtml = `<span style="color:#22d3ee; font-weight:bold; letter-spacing:0.5px;">⚡ ${dirText} · [Durdur: Boşluk / Ters Yön]</span>`;
     } else if (player.isInElevator) {
-      this.stationStatus.style.display = 'block';
-      this.stationStatus.innerHTML = '<span style="color:#06b6d4; font-size:10.5px;">🔩 Asansör Şaftı · <b>2x [W]</b>: Otomatik Yukarı | <b>2x [S]</b>: Otomatik Aşağı</span>';
+      nextStatusHtml = '<span style="color:#06b6d4; font-size:10.5px;">🔩 Asansör Şaftı · <b>2x [W]</b>: Otomatik Yukarı | <b>2x [S]</b>: Otomatik Aşağı</span>';
     } else if (isRefueling) {
-      this.stationStatus.style.display = 'block';
-      if (player.money < 0) {
-        this.stationStatus.innerHTML = '<span style="color:#fb923c;">⛽ İkmal & Onarım Yapılıyor (💳 Acil Kredi Devrede)...</span>';
+      nextStatusHtml = player.money < 0
+        ? '<span style="color:#fb923c;">⛽ İkmal & Onarım Yapılıyor (💳 Acil Kredi Devrede)...</span>'
+        : '<span style="color:#38bdf8;">⛽ İkmal & Onarım Yapılıyor...</span>';
+    }
+
+    if (this.lastHud.stationStatusHtml !== nextStatusHtml) {
+      this.lastHud.stationStatusHtml = nextStatusHtml;
+      if (nextStatusHtml) {
+        this.stationStatus.style.display = 'block';
+        this.stationStatus.innerHTML = nextStatusHtml;
       } else {
-        this.stationStatus.innerHTML = '<span style="color:#38bdf8;">⛽ İkmal & Onarım Yapılıyor...</span>';
+        this.stationStatus.style.display = 'none';
+        this.stationStatus.innerHTML = '';
       }
-    } else {
-      this.stationStatus.style.display = 'none';
     }
 
     // 8. Subterranean Active Hararet & Overdrive HUD
@@ -434,30 +560,35 @@ export class UIManager {
       const heatVal = Math.round(player.heat ?? 0);
       const lockout = player.heatLockoutTimer ?? 0;
 
+      let heatText: string;
+      let heatPct: number;
+      let heatColor: string;
       if (lockout > 0) {
-        this.tempVal.innerText = `🔥 KİLİT! ${lockout.toFixed(1)}s`;
-        this.tempVal.style.color = '#ef4444';
-        this.tempBarFill.style.width = '100%';
-        this.tempBarFill.style.backgroundColor = '#ef4444';
+        heatText = `🔥 KİLİT! ${lockout.toFixed(1)}s`;
+        heatPct = 100;
+        heatColor = '#ef4444';
       } else if (heatVal >= 75) {
-        this.tempVal.innerText = `⚡ %${heatVal} (OD)`;
-        this.tempVal.style.color = '#fb923c';
-        this.tempBarFill.style.width = `${heatVal}%`;
-        this.tempBarFill.style.backgroundColor = '#f97316';
+        heatText = `⚡ %${heatVal} (OD)`;
+        heatPct = heatVal;
+        heatColor = '#f97316';
       } else {
-        this.tempVal.innerText = `%${heatVal}`;
-        this.tempBarFill.style.width = `${heatVal}%`;
+        heatText = `%${heatVal}`;
+        heatPct = heatVal;
+        heatColor = heatVal >= 50 ? '#facc15' : heatVal >= 25 ? '#38bdf8' : '#06b6d4';
+      }
 
-        if (heatVal >= 50) {
-          this.tempBarFill.style.backgroundColor = '#facc15';
-          this.tempVal.style.color = '#facc15';
-        } else if (heatVal >= 25) {
-          this.tempBarFill.style.backgroundColor = '#38bdf8';
-          this.tempVal.style.color = '#38bdf8';
-        } else {
-          this.tempBarFill.style.backgroundColor = '#06b6d4';
-          this.tempVal.style.color = '#06b6d4';
-        }
+      if (this.lastHud.heatText !== heatText) {
+        this.lastHud.heatText = heatText;
+        this.tempVal.innerText = heatText;
+      }
+      if (this.lastHud.heatPct !== heatPct) {
+        this.lastHud.heatPct = heatPct;
+        this.tempBarFill.style.width = `${heatPct}%`;
+      }
+      if (this.lastHud.heatColor !== heatColor) {
+        this.lastHud.heatColor = heatColor;
+        this.tempBarFill.style.backgroundColor = heatColor;
+        this.tempVal.style.color = heatColor === '#f97316' ? '#fb923c' : heatColor;
       }
     }
   }
@@ -538,11 +669,11 @@ export class UIManager {
     const bonusLabel = dinoBonus > 1 ? ` (+$${total - baseTotal} %15 Müze Bonusu)` : '';
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} SATILDI!${bonusLabel}`, '#facc15');
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: this.playerRef.money, changeAmount: total, reason: 'Tüm Madenleri Sat' }
-      }));
-    }
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: this.playerRef.money,
+      changeAmount: total,
+      reason: 'Tüm Madenleri Sat'
+    });
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -566,11 +697,11 @@ export class UIManager {
     const bonusLabel = dinoBonus > 1 ? ` (+%15 Fosil)` : '';
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} ${oreName} (${matching.length}x) Satıldı!${bonusLabel}`, '#facc15');
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: this.playerRef.money, changeAmount: total, reason: `${oreName} Satışı` }
-      }));
-    }
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: this.playerRef.money,
+      changeAmount: total,
+      reason: `${oreName} Satışı`
+    });
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -622,11 +753,11 @@ export class UIManager {
     const bonusLabel = dinoBonus > 1 ? ` (+%15 Fosil)` : '';
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} SATILDI! (${toSell.length} maden satıldı, ${keptCargo.length} korundu)${bonusLabel}`, '#facc15');
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: this.playerRef.money, changeAmount: total, reason: 'Üretim Harici Maden Satışı' }
-      }));
-    }
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: this.playerRef.money,
+      changeAmount: total,
+      reason: 'Üretim Harici Maden Satışı'
+    });
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -668,11 +799,11 @@ export class UIManager {
     (this.playerRef.upgrades as any)[key] = nextTierConfig.level;
     sounds.playSellSound();
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: this.playerRef.money, changeAmount: -nextTierConfig.cost, reason: `${config.name} Seviye ${nextTierConfig.level}` }
-      }));
-    }
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: this.playerRef.money,
+      changeAmount: -nextTierConfig.cost,
+      reason: `${config.name} Seviye ${nextTierConfig.level}`
+    });
 
     switch (key) {
       case 'drill':
@@ -722,11 +853,11 @@ export class UIManager {
     sounds.playSellSound();
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+${result.addedAmount} ${item.name}`, '#4ade80');
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: this.playerRef.money, changeAmount: -result.totalCost, reason: `${item.name} x${count}` }
-      }));
-    }
+    emitGameEvent('polyminer:wallet-changed', {
+      newMoney: this.playerRef.money,
+      changeAmount: -result.totalCost,
+      reason: `${item.name} x${count}`
+    });
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -1008,9 +1139,7 @@ export class UIManager {
       if (btnClaim) {
         btnClaim.addEventListener('click', () => {
           if (player.museumRewardClaimed) return;
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('polyminer:museum-claim'));
-          }
+          emitGameEvent('polyminer:museum-claim');
           if (this.onStateChange) this.onStateChange();
           this.renderShopContent();
         });
@@ -1279,7 +1408,7 @@ export class UIManager {
         this.btnCoopJoinRoom!.innerText = '⏳ Bağlanıyor...';
 
         // Pre-save solo game before connecting to any remote host
-        window.dispatchEvent(new CustomEvent('polyminer:pre-join'));
+        emitGameEvent('polyminer:pre-join');
 
         this.networkManager!.joinRoom(
           inputVal,
