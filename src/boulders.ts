@@ -2,7 +2,15 @@ import { Tile, TileType, FallingBoulder } from './types';
 import { TILE_SIZE, ROCK_HARDNESS } from './constants';
 import { PlayerExtendedState, getDamageReductionFactor, PLAYER_WIDTH, PLAYER_HEIGHT, GRAVITY } from './player';
 import { sounds } from './audio';
-import { addFloatingText, addShockwave } from './effects';
+import {
+  addFloatingText,
+  addShockwave,
+  spawnParticle,
+  spawnBlockBreakBurst,
+  spawnDustPuff,
+  addScreenShake,
+  addDamageFlash
+} from './effects';
 import { markWorldDirty } from './world';
 import { emitGameEvent } from './events';
 
@@ -31,6 +39,8 @@ function settleBoulderAt(
     };
     markWorldDirty();
     sounds.playImpactSound(70);
+    addScreenShake(2.8, 0.14);
+    spawnDustPuff(b.x + TILE_SIZE / 2, settleRow * TILE_SIZE + TILE_SIZE, '#94a3b8', 7);
     addShockwave(b.x + TILE_SIZE / 2, settleRow * TILE_SIZE + TILE_SIZE / 2, 28);
     emitBoulderTileChange(b.gx, settleRow, TileType.ROCK);
   }
@@ -94,6 +104,19 @@ export function updateBoulders(
 
     if (b.state === 'tremble') {
       b.trembleTimer -= dt;
+      if (Math.random() < dt * 10) {
+        spawnParticle({
+          x: b.x + 6 + Math.random() * (TILE_SIZE - 12),
+          y: b.y + TILE_SIZE - 2,
+          vx: (Math.random() - 0.5) * 30,
+          vy: 25 + Math.random() * 40,
+          size: 2.5,
+          color: '#94a3b8',
+          lifetime: 0.45,
+          gravity: 320,
+          shape: 'square'
+        });
+      }
       if (b.trembleTimer <= 0) {
         b.state = 'falling';
         b.vy = 60; // Initial downward drop speed
@@ -129,6 +152,9 @@ export function updateBoulders(
       player.hull = Math.max(0, player.hull - damage);
       player.vy = Math.max(player.vy, b.vy * 0.65); // Downward slam impulse
       sounds.playImpactSound(damage * 3);
+      addScreenShake(9.0, 0.30);
+      addDamageFlash(0.48);
+      spawnBlockBreakBurst(b.x + TILE_SIZE / 2, b.y + TILE_SIZE / 2, '#64748b', 14);
       addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 16, `-${damage} KAYA EZMESİ!`, '#ef4444');
       addShockwave(b.x + TILE_SIZE / 2, b.y + TILE_SIZE / 2, 45);
     }

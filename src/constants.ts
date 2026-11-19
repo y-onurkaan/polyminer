@@ -8,14 +8,15 @@ export const SURFACE_ROW = 3; // Rows 0, 1, 2 are sky; Row 3 is surface level
 // Radar / Fog of War Constants
 export const DEFAULT_RADAR_RADIUS = 2.5; // In tile units
 
-// Fall Damage Constants
-export const SAFE_LANDING_SPEED = 250; // px/s (1 block fall = ~240 px/s is 100% safe; damage starts after > 1 block)
-export const FALL_DAMAGE_FACTOR = 0.33; // damage per px/s above threshold (2 blocks = ~30 HP)
-export const DEEP_FALL_THRESHOLD_SPEED = 165; // px/s excess (speed reached after falling 3+ blocks / 144px)
-export const DEEP_FALL_PENALTY_MULTIPLIER = 1.20; // +20% damage penalty for falls from 3 blocks and deeper
+// Fall Damage & Retro-Thruster Constants
+export const SAFE_LANDING_SPEED = 270; // px/s (1 block = ~240 px/s is safely below threshold)
+export const FALL_DAMAGE_MAX_BASE = 160; // base damage at terminal velocity (760 px/s) before armor/relic mitigation
+export const FALL_DAMAGE_EXPONENT = 1.20; // smooth progressive curve (no sudden cliff jump)
+export const FALL_BRAKE_MULTIPLIER = 1.50; // +50% retro-thruster deceleration while falling fast (vy > 120)
 
-// Rock Hardness
+// Rock Hardness & Fuel Economics
 export const ROCK_HARDNESS = 5.0;
+export const FUEL_COST_PER_LITRE = 1.0;
 
 // Geologic Biome Configurations
 export interface BiomeConfig {
@@ -307,11 +308,11 @@ export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
     desc: 'Daha derin maden seferleri için kapasite',
     icon: '🛢️',
     levels: [
-      { level: 1, value: 100, label: '100 Litre', cost: 0 },
-      { level: 2, value: 160, label: '160 Litre', cost: 120, oreReqs: { iron: 2 } },
-      { level: 3, value: 240, label: '240 Litre', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 360, label: '360 Litre', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 520, label: '520 Litre', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 1, value: 60, label: '60 Litre', cost: 0 },
+      { level: 2, value: 110, label: '110 Litre', cost: 120, oreReqs: { iron: 2 } },
+      { level: 3, value: 185, label: '185 Litre', cost: 500, oreReqs: { silver: 3 } },
+      { level: 4, value: 290, label: '290 Litre', cost: 1500, oreReqs: { gold: 3 } },
+      { level: 5, value: 450, label: '450 Litre', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
     ]
   },
   cargo: {

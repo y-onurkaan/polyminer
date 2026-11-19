@@ -1,7 +1,15 @@
 import { Tile, TileType, RemotePlayerState } from './types';
-import { TILE_SIZE, GRID_WIDTH, GRID_HEIGHT, SURFACE_ROW, getBiomeForDepth } from './constants';
-import { PlayerExtendedState, PLAYER_WIDTH, PLAYER_HEIGHT, getBlockTier } from './player';
+import {
+  TILE_SIZE,
+  GRID_WIDTH,
+  GRID_HEIGHT,
+  SURFACE_ROW,
+  SAFE_LANDING_SPEED,
+  getBiomeForDepth
+} from './constants';
+import { PlayerExtendedState, PLAYER_WIDTH, PLAYER_HEIGHT, MAX_FALL_SPEED, getBlockTier } from './player';
 import { getWorldRenderVersion } from './world';
+import { getDamageFlashAlpha, getBiomeBanner } from './effects';
 
 let radarCacheCanvas: HTMLCanvasElement | null = null;
 let radarCacheVersion = -1;
@@ -15,6 +23,60 @@ const STARS = Array.from({ length: 48 }, () => ({
   brightness: 0.4 + Math.random() * 0.6,
   speed: 0.08 + Math.random() * 0.15
 }));
+
+// Deterministic subterranean ambient motes (zero per-frame allocations)
+const AMBIENT_MOTES = Array.from({ length: 18 }, (_, i) => ({
+  nx: ((i * 73 + 19) % 97) / 97,
+  ny: ((i * 137 + 41) % 101) / 101,
+  driftX: ((i % 5) - 2) * 3.5,
+  driftY: 6 + (i % 4) * 4,
+  radius: 1.0 + (i % 3) * 0.55,
+  phase: i * 0.9
+}));
+
+function getBiomeMoteRgb(biomeId: string): [number, number, number] {
+  switch (biomeId) {
+    case 'quartz':
+      return [192, 132, 252];
+    case 'basalt':
+      return [163, 230, 53];
+    case 'magma':
+      return [251, 146, 60];
+    default:
+      return [217, 179, 130];
+  }
+}
+
+function renderBiomeAmbientMotes(
+  ctx: CanvasRenderingContext2D,
+  cameraY: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  surfaceScreenY: number,
+  nowMs: number
+): void {
+  const undergroundTop = Math.max(0, surfaceScreenY);
+  if (undergroundTop >= viewportHeight) return;
+
+  const viewCenterRow = Math.floor((cameraY + viewportHeight * 0.5) / TILE_SIZE);
+  const biome = getBiomeForDepth(viewCenterRow);
+  const [r, g, b] = getBiomeMoteRgb(biome.id);
+  const t = nowMs * 0.001;
+  const riseDir = biome.id === 'magma' ? -1 : 1;
+
+  ctx.save();
+  for (const m of AMBIENT_MOTES) {
+    const px = (((m.nx * viewportWidth + t * m.driftX) % viewportWidth) + viewportWidth) % viewportWidth;
+    const py = (((m.ny * viewportHeight - cameraY * 0.65 + t * m.driftY * riseDir) % viewportHeight) + viewportHeight) % viewportHeight;
+    if (py < undergroundTop + 6) continue;
+
+    const alpha = Math.max(0.08, 0.24 + 0.30 * Math.sin(t * 2.2 + m.phase));
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    const size = m.radius * 2;
+    ctx.fillRect(px, py, size, size);
+  }
+  ctx.restore();
+}
 
 // Drifting minimalist clouds (serene drift speed)
 const CLOUDS = [
@@ -468,7 +530,8 @@ export function renderWorld(
   viewportWidth: number,
   viewportHeight: number,
   player?: PlayerExtendedState,
-  remotePlayers?: Map<string, RemotePlayerState>
+  remotePlayers?: Map<string, RemotePlayerState>,
+  includeMiniRadar: boolean = true
 ): void {
   const surfaceScreenY = SURFACE_ROW * TILE_SIZE - cameraY;
   const now = performance.now();
@@ -883,18 +946,58 @@ export function renderWorld(
         ctx.restore();
       }
 
-      // Highlight block currently being drilled
+      // Progressive 3-stage fracture overlay on block currently being drilled
       if (player?.isDrilling && player.drillTarget?.gx === x && player.drillTarget?.gy === y) {
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 2;
+        const p = Math.max(0, Math.min(1, player.drillProgress || 0));
+        const crackAlpha = 0.25 + p * 0.65;
+        const jx = p > 0.68 ? (Math.random() - 0.5) * 1.6 : 0;
+        const jy = p > 0.68 ? (Math.random() - 0.5) * 1.6 : 0;
+
+        ctx.save();
+        ctx.strokeStyle = `rgba(245, 158, 11, ${0.4 + p * 0.6})`;
+        ctx.lineWidth = 1.5 + p;
         ctx.strokeRect(screenX + 1, screenY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.beginPath();
-        ctx.moveTo(screenX + 6, screenY + 6);
-        ctx.lineTo(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
-        ctx.lineTo(screenX + TILE_SIZE - 8, screenY + 10);
-        ctx.stroke();
+        if (p > 0.05) {
+          ctx.strokeStyle = `rgba(255, 255, 255, ${crackAlpha * 0.7})`;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(screenX + 8 + jx, screenY + 8 + jy);
+          ctx.lineTo(screenX + TILE_SIZE * 0.52 + jx, screenY + TILE_SIZE * 0.5 + jy);
+          ctx.lineTo(screenX + TILE_SIZE - 10 + jx, screenY + TILE_SIZE * 0.3 + jy);
+          ctx.stroke();
+        }
+
+        if (p > 0.35) {
+          ctx.strokeStyle = `rgba(255, 255, 255, ${crackAlpha * 0.85})`;
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(screenX + TILE_SIZE * 0.52 + jx, screenY + TILE_SIZE * 0.5 + jy);
+          ctx.lineTo(screenX + 10 + jx, screenY + TILE_SIZE - 10 + jy);
+          ctx.moveTo(screenX + TILE_SIZE * 0.45 + jx, screenY + TILE_SIZE * 0.48 + jy);
+          ctx.lineTo(screenX + TILE_SIZE - 8 + jx, screenY + TILE_SIZE - 9 + jy);
+          ctx.stroke();
+        }
+
+        if (p > 0.68) {
+          const glowColor = player.isStruggling
+            ? '#ef4444'
+            : tile.ore?.color || '#f59e0b';
+          ctx.strokeStyle = glowColor;
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.moveTo(screenX + TILE_SIZE * 0.5 + jx, screenY + 6 + jy);
+          ctx.lineTo(screenX + TILE_SIZE * 0.5 + jx, screenY + TILE_SIZE - 6 + jy);
+          ctx.moveTo(screenX + 7 + jx, screenY + TILE_SIZE * 0.5 + jy);
+          ctx.lineTo(screenX + TILE_SIZE - 7 + jx, screenY + TILE_SIZE * 0.5 + jy);
+          ctx.stroke();
+
+          ctx.fillStyle = `rgba(254, 240, 138, ${Math.min(0.65, (p - 0.68) * 2)})`;
+          ctx.beginPath();
+          ctx.arc(screenX + TILE_SIZE / 2 + jx, screenY + TILE_SIZE / 2 + jy, 4 + p * 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
     }
 
@@ -919,8 +1022,13 @@ export function renderWorld(
     ctx.stroke();
   }
 
-  // 4. Vertical Mini-Radar Map (24x120 Grid Mini-Map on Right Side)
-  if (player) {
+  // 4. Subterranean Ambient Biome Motes
+  if (surfaceScreenY < viewportHeight) {
+    renderBiomeAmbientMotes(ctx, cameraY, viewportWidth, viewportHeight, surfaceScreenY, now);
+  }
+
+  // 5. Vertical Mini-Radar Map (decoupled when called outside camera shake transform)
+  if (includeMiniRadar && player) {
     renderMiniRadar(ctx, world, player, cameraY, viewportWidth, viewportHeight, remotePlayers);
   }
 }
@@ -928,7 +1036,7 @@ export function renderWorld(
 /**
  * Draws the vertical mini-radar map on the left edge of the screen.
  */
-function renderMiniRadar(
+export function renderMiniRadar(
   ctx: CanvasRenderingContext2D,
   world: Tile[][],
   player: PlayerExtendedState,
@@ -1546,6 +1654,45 @@ export function renderPlayer(
     gameTime
   );
 
+  // Airborne Fall Speed Wind Streaks & Retro-Brake Visual Cue
+  if (!player.isGrounded && !player.isInElevator && !player.elevatorAuto) {
+    const pcx = screenX + PLAYER_WIDTH / 2;
+    if (player.vy > SAFE_LANDING_SPEED) {
+      const span = Math.max(1, MAX_FALL_SPEED - SAFE_LANDING_SPEED);
+      const fallRatio = Math.min(1, (player.vy - SAFE_LANDING_SPEED) / span);
+      const streakLen = 10 + fallRatio * 18;
+      const alpha = 0.35 + fallRatio * 0.5;
+      const dangerColor = fallRatio >= 0.45 ? `rgba(239, 68, 68, ${alpha})` : `rgba(250, 204, 21, ${alpha})`;
+
+      ctx.save();
+      ctx.strokeStyle = dangerColor;
+      ctx.lineWidth = 1.6;
+      const leftOffsets = [-7, -2, PLAYER_WIDTH + 2, PLAYER_WIDTH + 7];
+      for (let i = 0; i < leftOffsets.length; i++) {
+        const phase = ((gameTime * 0.015 + i * 0.37) % 1) * 14;
+        const sx = screenX + leftOffsets[i];
+        const sy = screenY + PLAYER_HEIGHT - phase;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx, sy - streakLen);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    if (player.isThrusting && player.vy > 120) {
+      ctx.save();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2.2;
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(pcx, screenY + PLAYER_HEIGHT + 2, 18, Math.PI * 0.12, Math.PI * 0.88);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // Local drilling warning text (struggle / overdrive)
   if (player.isDrilling) {
     const barY = screenY - 9;
@@ -1740,5 +1887,94 @@ export function renderRemotePlayers(
     ctx.textBaseline = 'middle';
     ctx.fillText(labelText, centerX, pillY + pillH / 2);
     ctx.restore();
+  }
+}
+
+/**
+ * Renders HUD-level screen overlays outside the camera shake transform:
+ * critical edge pulse, damage vignette flash, and biome transition banner.
+ */
+export function renderScreenOverlays(
+  ctx: CanvasRenderingContext2D,
+  viewportWidth: number,
+  viewportHeight: number,
+  player: PlayerExtendedState
+): void {
+  const cx = viewportWidth / 2;
+  const cy = viewportHeight / 2;
+  const innerR = Math.min(viewportWidth, viewportHeight) * 0.32;
+  const outerR = Math.hypot(viewportWidth, viewportHeight) * 0.55;
+
+  // 1. Critical Warning Breathing Edge Glow (hull < 25%, heat >= 80 / lockout, or low underground fuel)
+  const hullCrit = player.maxHull > 0 && player.hull / player.maxHull < 0.25;
+  const heatCrit = (player.heat ?? 0) >= 80 || (player.heatLockoutTimer ?? 0) > 0;
+  const isUnderground = player.y > (SURFACE_ROW + 0.5) * TILE_SIZE;
+  const fuelCrit = isUnderground && player.maxFuel > 0 && player.fuel / player.maxFuel < 0.18;
+
+  if (hullCrit || heatCrit || fuelCrit) {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const pulse = 0.06 + 0.08 * (0.5 + 0.5 * Math.sin(now * 0.007));
+    const rgb = hullCrit
+      ? '239, 68, 68'
+      : heatCrit
+        ? '249, 115, 22'
+        : '245, 158, 11';
+
+    ctx.save();
+    const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+    grad.addColorStop(0, `rgba(${rgb}, 0)`);
+    grad.addColorStop(1, `rgba(${rgb}, ${pulse})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, viewportWidth, viewportHeight);
+    ctx.restore();
+  }
+
+  // 2. Impact / Thermal Damage Vignette Flash
+  const flashAlpha = getDamageFlashAlpha();
+  if (flashAlpha > 0.01) {
+    ctx.save();
+    const grad = ctx.createRadialGradient(cx, cy, innerR * 0.9, cx, cy, outerR);
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0)');
+    grad.addColorStop(1, `rgba(220, 38, 38, ${flashAlpha})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, viewportWidth, viewportHeight);
+    ctx.restore();
+  }
+
+  // 3. Top Biome Transition Banner
+  const banner = getBiomeBanner();
+  if (banner) {
+    const elapsed = banner.maxTimer - banner.timer;
+    const fadeIn = Math.min(1, elapsed / 0.35);
+    const fadeOut = Math.min(1, banner.timer / 0.65);
+    const alpha = Math.max(0, Math.min(1, Math.min(fadeIn, fadeOut)));
+    if (alpha > 0.01) {
+      const label = `◆ ${banner.name.toUpperCase()} · KATMAN ${banner.tier}`;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = 'bold 12px monospace';
+      const textW = ctx.measureText(label).width;
+      const pillW = Math.max(210, textW + 34);
+      const pillH = 28;
+      const pillX = (viewportWidth - pillW) / 2;
+      const pillY = 14;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+      ctx.strokeStyle = banner.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(pillX, pillY, pillW, pillH, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = banner.color;
+      ctx.fillRect(pillX + 10, pillY + pillH - 3, pillW - 20, 2);
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, viewportWidth / 2, pillY + pillH / 2 - 1);
+      ctx.restore();
+    }
   }
 }

@@ -171,6 +171,24 @@ export class SoundEngine {
     this.stopContinuousLoop(osc, gain, 0.06);
   }
 
+  /**
+   * Modulates active drill pitch based on mining progress, struggle state, and thermal overdrive.
+   */
+  public updateDrillModulation(progress: number, isStruggling: boolean, isOverdrive: boolean): void {
+    if (!this.isDrillPlaying || !this.drillOsc || !this.ctx || this.muted) return;
+    const p = Math.max(0, Math.min(1, progress));
+    const targetFreq = isStruggling
+      ? 76 + p * 24
+      : isOverdrive
+        ? 135 + p * 50
+        : 105 + p * 43;
+    try {
+      this.drillOsc.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.04);
+    } catch {
+      // Ignore Web Audio scheduling errors
+    }
+  }
+
   // 3. Crystal Gem Collection Chime
   public playGemCollect(sides: number) {
     if (this.muted) return;
@@ -619,6 +637,106 @@ export class SoundEngine {
           osc.stop(now + n.time + n.dur + 0.02);
         });
       }
+    } catch {
+      // Ignore
+    }
+  }
+
+  // 17. Tactile Block Shatter Cues (dirt, rock, ore)
+  public playBlockBreak(kind: 'dirt' | 'rock' | 'ore'): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      if (kind === 'dirt') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(70, now + 0.06);
+        gain.gain.setValueAtTime(0.10, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.065);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.075);
+      } else if (kind === 'rock') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(210, now);
+        osc.frequency.exponentialRampToValueAtTime(55, now + 0.11);
+        gain.gain.setValueAtTime(0.16, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.115);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.125);
+      } else {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(780, now + 0.08);
+        gain.gain.setValueAtTime(0.11, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.085);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.095);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  // 18. Workshop Upgrade Purchase Chime
+  public playUpgradeSound(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      [392, 523.25, 659.25, 783.99].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = idx >= 2 ? 'sine' : 'triangle';
+        const t = now + idx * 0.055;
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.001, t);
+        gain.gain.linearRampToValueAtTime(0.16, t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.30);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  // 19. Subtle Atmospheric Biome Transition Chord
+  public playBiomeTransition(): void {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      [220, 329.63].forEach((freq) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.linearRampToValueAtTime(0.06, now + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.58);
+      });
     } catch {
       // Ignore
     }

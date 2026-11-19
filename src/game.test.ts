@@ -7,6 +7,7 @@ import {
   SURFACE_ROW,
   ORE_DEFINITIONS,
   ROCK_HARDNESS,
+  FALL_BRAKE_MULTIPLIER,
   getUpgradeLevelValue
 } from './constants';
 import {
@@ -22,6 +23,8 @@ import {
   updatePlayer,
   canDrillBlock,
   getBlockTier,
+  computeFallDamage,
+  triggerOverheatLockout,
   buyConsumableItem,
   useConsumableItem,
   detonateDynamite,
@@ -38,10 +41,24 @@ import {
 } from './boulders';
 import { serializeWorld, applySavedGrid, migrateSaveData, applyLoadedGame } from './save';
 import { emitGameEvent, onGameEvent } from './events';
+import {
+  MAX_PARTICLES,
+  spawnParticle,
+  addScreenShake,
+  getScreenShakeOffset,
+  addDamageFlash,
+  getDamageFlashAlpha,
+  showBiomeBanner,
+  getBiomeBanner,
+  updateEffects,
+  clearEffects,
+  getEffectsDebugStats
+} from './effects';
 
 describe('Polyminer Faz A Core Gameplay & Stabilization Tests', () => {
   beforeEach(() => {
     resetBoulders();
+    clearEffects();
     vi.restoreAllMocks();
   });
 
@@ -396,6 +413,7 @@ describe('Polyminer Faz A Core Gameplay & Stabilization Tests', () => {
 describe('Polyminer Faz B Architecture, Cache & Tier Tests', () => {
   beforeEach(() => {
     resetBoulders();
+    clearEffects();
     vi.restoreAllMocks();
   });
 
@@ -549,5 +567,199 @@ describe('Polyminer Faz B Architecture, Cache & Tier Tests', () => {
     expect(getBlockTier(rockTile, 220)).toBe(5);
     expect(canDrillBlock(rockTile, 3, 220)).toBe(false);
     expect(canDrillBlock(rockTile, 4, 220)).toBe(true);
+  });
+});
+
+describe('Polyminer Faz C Game Feel, Particles, Shake & Overlay Tests', () => {
+  beforeEach(() => {
+    resetBoulders();
+    clearEffects();
+    vi.restoreAllMocks();
+  });
+
+  it('caps pooled particles at MAX_PARTICLES, steps expiration via updateEffects, and resets on clearEffects', () => {
+    for (let i = 0; i < MAX_PARTICLES + 25; i++) {
+      spawnParticle({
+        x: i,
+        y: 100,
+        vx: 10,
+        vy: -20,
+        size: 3,
+        color: '#facc15',
+        lifetime: 0.25,
+        shape: 'square'
+      });
+    }
+
+    expect(getEffectsDebugStats().particleCount).toBe(MAX_PARTICLES);
+
+    // Step past particle lifetime -> all expire cleanly
+    updateEffects(0.30);
+    expect(getEffectsDebugStats().particleCount).toBe(0);
+
+    // clearEffects clears particles, texts, shake, flash, and banner together
+    spawnParticle({ x: 10, y: 10, vx: 0, vy: 0, size: 3, color: '#fff', lifetime: 1 });
+    addScreenShake(6, 0.4);
+    addDamageFlash(0.4);
+    showBiomeBanner('Kuvars Mağaraları', 2, '#a855f7', 2.0);
+    clearEffects();
+
+    const stats = getEffectsDebugStats();
+    expect(stats.particleCount).toBe(0);
+    expect(stats.shakeActive).toBe(false);
+    expect(stats.damageFlashAlpha).toBe(0);
+    expect(stats.hasBiomeBanner).toBe(false);
+  });
+
+  it('retains stronger screen shake impulses, clamps damage flash, and decays biome banners over dt', () => {
+    addScreenShake(10, 0.5);
+    // Overlapping weaker short shake should not reduce remaining stronger effective intensity
+    addScreenShake(2, 0.1);
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+    const initialOffset = getScreenShakeOffset();
+    expect(initialOffset.x).toBeGreaterThanOrEqual(9.9);
+    expect(initialOffset.y).toBeGreaterThanOrEqual(9.9);
+
+    updateEffects(0.55);
+    expect(getScreenShakeOffset()).toEqual({ x: 0, y: 0 });
+    expect(getEffectsDebugStats().shakeActive).toBe(false);
+
+    // Damage flash clamps at 0.55 and decays to 0
+    addDamageFlash(0.95);
+    expect(getDamageFlashAlpha()).toBeCloseTo(0.55, 6);
+    updateEffects(0.30);
+    expect(getDamageFlashAlpha()).toBe(0);
+
+    // Biome banner stays active during duration then clears cleanly
+    showBiomeBanner('Bazalt & Gaz Katmanı', 3, '#a3e635', 1.5);
+    expect(getBiomeBanner()?.name).toBe('Bazalt & Gaz Katmanı');
+    updateEffects(1.0);
+    expect(getBiomeBanner()?.tier).toBe(3);
+    updateEffects(0.6);
+    expect(getBiomeBanner()).toBeNull();
+  });
+
+  it('triggers particles, screen shake, and damage flash from dynamite, overheat lockout, and boulder crush', () => {
+    // 1. Dynamite blast: particles + screen shake
+    const world = createEmptyWorld();
+    world[21][10] = { type: TileType.DIRT, hardness: 1.0, revealed: true };
+    const player = createPlayer();
+    player.x = 10 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    player.y = 20 * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT) / 2;
+    player.facing = 'down';
+    player.inventory.dynamite = 1;
+
+    expect(detonateDynamite(player, world)).toBe(true);
+    let stats = getEffectsDebugStats();
+    expect(stats.particleCount).toBeGreaterThan(0);
+    expect(stats.shakeActive).toBe(true);
+
+    // 2. Overheat lockout: screen shake + damage flash + steam puff
+    clearEffects();
+    player.hull = 100;
+    triggerOverheatLockout(player);
+    stats = getEffectsDebugStats();
+    expect(stats.particleCount).toBeGreaterThan(0);
+    expect(stats.shakeActive).toBe(true);
+    expect(stats.damageFlashAlpha).toBeGreaterThan(0);
+
+    // 3. Falling boulder crush: screen shake + damage flash + debris burst
+    clearEffects();
+    const crushWorld = createEmptyWorld();
+    crushWorld[10][5] = { type: TileType.ROCK, hardness: ROCK_HARDNESS, revealed: true };
+    crushWorld[14][5] = { type: TileType.DIRT, hardness: 1.0, revealed: true };
+    player.x = 5 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    player.y = 11.4 * TILE_SIZE;
+    player.hull = 100;
+
+    checkAndTriggerFallingRock(crushWorld, 5, 11);
+    updateBoulders(0.5, crushWorld, player);
+    for (let i = 0; i < 15; i++) {
+      updateBoulders(0.016, crushWorld, player);
+    }
+
+    stats = getEffectsDebugStats();
+    expect(player.hull).toBe(45);
+    expect(stats.particleCount).toBeGreaterThan(0);
+    expect(stats.shakeActive).toBe(true);
+    expect(stats.damageFlashAlpha).toBeGreaterThan(0);
+  });
+
+  it('computes smooth high-stakes fall damage curve with armor and relic scaling', () => {
+    // Base hull Lv.1, no relic
+    expect(computeFallDamage(240)).toBe(0); // 1 block safe
+    expect(computeFallDamage(270)).toBe(0); // exact threshold safe
+    expect(computeFallDamage(339.4)).toBe(15); // 2 blocks
+    expect(computeFallDamage(415.7)).toBe(37); // 3 blocks
+    expect(computeFallDamage(480)).toBe(58); // 4 blocks
+    expect(computeFallDamage(536.7)).toBe(77); // 5 blocks
+    expect(computeFallDamage(635)).toBe(112); // 7 blocks
+    expect(computeFallDamage(760)).toBe(160); // 10 blocks terminal cliff
+
+    // Smooth monotonic increments between 2-5 blocks (no sudden cliff jump)
+    const d2 = computeFallDamage(339.4);
+    const d3 = computeFallDamage(415.7);
+    const d4 = computeFallDamage(480);
+    const d5 = computeFallDamage(536.7);
+    expect(d3 - d2).toBeLessThan(25);
+    expect(d4 - d3).toBeLessThan(25);
+    expect(d5 - d4).toBeLessThan(25);
+
+    // Armor Lv.5 (x0.6) and Obsidian Tablet (x0.75) scaling at terminal speed
+    expect(computeFallDamage(760, 5, false)).toBe(96);
+    expect(computeFallDamage(760, 5, true)).toBe(72);
+  });
+
+  it('applies FALL_BRAKE_MULTIPLIER when thrusting to brake a fast fall', () => {
+    const world = createEmptyWorld();
+
+    const fallingPlayer = createPlayer();
+    fallingPlayer.x = 10 * TILE_SIZE;
+    fallingPlayer.y = 15 * TILE_SIZE;
+    fallingPlayer.isGrounded = false;
+    fallingPlayer.vy = 500;
+
+    updatePlayer(fallingPlayer, world, { ArrowUp: true }, 0.05, false);
+    const brakeDelta = 500 - fallingPlayer.vy;
+    expect(brakeDelta).toBeCloseTo(fallingPlayer.thrusterPower * FALL_BRAKE_MULTIPLIER * 0.05, 4);
+
+    const climbPlayer = createPlayer();
+    climbPlayer.x = 10 * TILE_SIZE;
+    climbPlayer.y = 15 * TILE_SIZE;
+    climbPlayer.isGrounded = false;
+    climbPlayer.vy = 0;
+
+    updatePlayer(climbPlayer, world, { ArrowUp: true }, 0.05, false);
+    const climbDelta = 0 - climbPlayer.vy;
+    expect(climbDelta).toBeCloseTo(climbPlayer.thrusterPower * 0.05, 4);
+    expect(brakeDelta).toBeGreaterThan(climbDelta);
+  });
+
+  it('uses canonical 60L starter fuel tank and clamps legacy 100L saves on load', () => {
+    const starter = createPlayer();
+    expect(starter.maxFuel).toBe(getUpgradeLevelValue('fuelTank', 1));
+    expect(starter.maxFuel).toBe(60);
+    expect(starter.fuel).toBe(60);
+
+    const world = createEmptyWorld();
+    const legacy100Save = {
+      version: 1,
+      player: {
+        x: 120,
+        y: 144,
+        fuel: 100,
+        maxFuel: 100,
+        money: 200,
+        upgrades: { fuelTank: 1 }
+      },
+      grid: serializeWorld(world)
+    };
+
+    const migrated = migrateSaveData(legacy100Save);
+    expect(migrated).not.toBeNull();
+    const restored = createPlayer();
+    applyLoadedGame(migrated!, restored, world);
+    expect(restored.maxFuel).toBe(60);
+    expect(restored.fuel).toBe(60);
   });
 });

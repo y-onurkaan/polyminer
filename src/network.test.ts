@@ -10,7 +10,7 @@ import {
   isInt
 } from './network';
 import { TileType } from './types';
-import { GRID_WIDTH, GRID_HEIGHT } from './constants';
+import { GRID_WIDTH, GRID_HEIGHT, getUpgradeLevelValue } from './constants';
 import { migrateSaveData, CURRENT_SAVE_VERSION, SavedTile } from './save';
 
 describe('P2P Sanitization & Validation Helpers', () => {
@@ -195,7 +195,7 @@ describe('P2P Sanitization & Validation Helpers', () => {
       expect(migrated).not.toBeNull();
       expect(migrated?.version).toBe(CURRENT_SAVE_VERSION);
       expect(migrated?.player.money).toBe(1500);
-      expect(migrated?.player.fuel).toBe(100);
+      expect(migrated?.player.fuel).toBe(getUpgradeLevelValue('fuelTank', 1));
       expect(migrated?.player.maxHull).toBe(100);
       expect(migrated?.player.upgrades.drill).toBe(1);
       expect(migrated?.player.inventory.fuelCanister).toBe(0);

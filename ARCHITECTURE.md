@@ -10,8 +10,8 @@
 - `TILE_SIZE = 48`, `GRID_WIDTH = 24`, `GRID_HEIGHT = 280`
 - `SURFACE_ROW = 3` (0-2 gökyüzü, 3 yüzey)
 - Katman bazlı blok kademesi (`getBlockTier`) ve `UPGRADES` tek kaynak tanımları: `ROCK` ve maden blokları biyom derinliğine göre matkap kademesi gerektirir; yükseltme/kapasite değerleri `UPGRADES` üzerinden türetilir
-- `SAFE_LANDING_SPEED = 250`, `FALL_DAMAGE_FACTOR = 0.33`: 1 blok (240 px/s) güvenli, 2 blok 30 HP
-- `DEEP_FALL_THRESHOLD_SPEED = 165`, `DEEP_FALL_PENALTY_MULTIPLIER = 1.20`: 3+ blok derin düşüşlerde +%20 hasar cezası
+- `SAFE_LANDING_SPEED = 270`, `FALL_DAMAGE_MAX_BASE = 160`, `FALL_DAMAGE_EXPONENT = 1.20`: 1 blok (`240 px/s`) güvenli; yüksekten düşüşlerde ani basamak olmadan pürüzsüz üstel hasar eğrisi
+- `FALL_BRAKE_MULTIPLIER = 1.50`: hızlı düşüşte (`vy > 120`) `[W]` retro-fren itkisi %50 daha güçlü frenler
 - `MAX_FALL_SPEED = 760`: 10 blokluk uçurum terminal hız tavanı
 - `BIOMES`: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği (550m)
 - `ORE_DEFINITIONS`: Bakır (3 kenar) → Elmas (8 kenar) ve Kadim Çekirdek (12 kenar)
@@ -27,16 +27,16 @@ Güncel sayısal değerler için kaynak olarak bu dosya esastır.
 | `main.ts` | Giriş noktası, oyun döngüsü, klavye ve dokunmatik girdi, güvenli kayıt (`safeSaveGame`) |
 | `events.ts` | Tip güvenli oyun içi olay veri yolu (`GameEventMap`, `emitGameEvent`, `onGameEvent`) |
 | `network.ts` | PeerJS P2P WebRTC oda yönetimi (`NetworkManager`), paket doğrulama, XSS arındırma, host otoritesi |
-| `types.ts` | `TileType`, `Tile`, `OreDefinition`, `RelicDefinition`, `PlayerState`, `RemotePlayerState` vb. |
+| `types.ts` | `TileType`, `Tile`, `OreDefinition`, `RelicDefinition`, `Particle`, `PlayerState`, `RemotePlayerState` vb. |
 | `constants.ts` | Sabitler, biyomlar, maden / fosil / sarf tanımları, `UPGRADES`, düşme hasarı katsayıları |
 | `world.ts` | Harita üretimi (`generateWorld`), sis açma (`revealTilesAround`), `getTile`, offscreen mini-radar kirli sürüm takibi (`worldRenderVersion`, `markWorldDirty`) |
 | `player.ts` | Fizik, matkap, yakıt/hararet/hasar, asansör rayı, dinamit, sandık, çekme ve ışınlanma (`updatePlayer`) |
 | `boulders.ts` | Düşen heyelan kayaları |
-| `effects.ts` | Yüzen hasar/para yazıları ve çarpma şok dalgaları |
-| `renderer.ts` | Dünya, oyuncu, çokgenler, offscreen önbellekli mini-radar ve interpolasyonlu / ekran-dışı göstergeli uzak oyuncular |
+| `effects.ts` | Parçacık havuzu (`MAX_PARTICLES`), ekran sarsıntısı (`addScreenShake`), hasar vinyeti (`addDamageFlash`), biyom geçiş bandı, yüzen metinler ve şok dalgaları |
+| `renderer.ts` | Dünya, aşamalı kazı çatlakları, biyom ortam tozları/kıvılcımları, viewport vinyet/uyarı katmanları (`renderScreenOverlays`), ayrıştırılmış offscreen mini-radar (`renderMiniRadar`) ve uzak oyuncular |
 | `ui.ts` | Dirty-check önbellekli HUD, tıklanabilir sarf rozetleri, dükkân, geliştirmeler (`UPGRADES`), müze, Co-op lobi/roster, yardım paneli (`UIManager`) |
 | `save.ts` | Çoklu slot `localStorage` kaydı / yüklemesi (`polyminer_save_v1`, `polyminer_save_coop_v1`), şema sürümü ve migrasyon |
-| `audio.ts` | Web Audio ile ses motoru (`SoundEngine`) |
+| `audio.ts` | Web Audio ses motoru (`SoundEngine`), dinamik matkap tonu modülasyonu, blok kırılma / yükseltme / biyom geçiş sesleri |
 | `style.css` | Ayrıştırılmış HUD, modal panelleri ve dokunmatik kontrol stilleri |
 
 `index.html` HUD ve panel HTML iskeletini içerir (`src/style.css`, `src/main.ts` üzerinden yüklenir).

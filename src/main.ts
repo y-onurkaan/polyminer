@@ -6,10 +6,12 @@ import {
   SURFACE_ROW,
   RELIC_DEFINITIONS,
   ROCK_HARDNESS,
-  MUSEUM_CURATOR_REWARD
+  FUEL_COST_PER_LITRE,
+  MUSEUM_CURATOR_REWARD,
+  getBiomeForDepth
 } from './constants';
 import { generateWorld, revealAdjacentTiles, markWorldDirty } from './world';
-import { renderWorld, renderPlayer, renderRemotePlayers } from './renderer';
+import { renderWorld, renderPlayer, renderRemotePlayers, renderMiniRadar, renderScreenOverlays } from './renderer';
 import {
   createPlayer,
   updatePlayer,
@@ -20,7 +22,7 @@ import {
   PLAYER_HEIGHT
 } from './player';
 import { UIManager } from './ui';
-import { updateEffects, renderEffects, addFloatingText } from './effects';
+import { updateEffects, renderEffects, addFloatingText, getScreenShakeOffset, showBiomeBanner } from './effects';
 import { saveGame, loadGame, applyLoadedGame, resetSave, serializeWorld, applySavedGrid } from './save';
 import { updateBoulders, renderBoulders } from './boulders';
 import { NetworkManager, MIN_SHARED_MONEY, MAX_SHARED_MONEY } from './network';
@@ -82,6 +84,17 @@ if (loadedSavedGame) {
   uiManager.showToast('💾 Kayıt Yüklendi!', '#38bdf8', 2200);
 }
 
+const BIOME_ACCENT_COLORS: Record<string, string> = {
+  crust: '#d97706',
+  quartz: '#a855f7',
+  basalt: '#a3e635',
+  magma: '#f97316'
+};
+
+let lastSubterraneanBiomeId = getBiomeForDepth(
+  Math.max(SURFACE_ROW + 1, Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE))
+).id;
+
 let wasGuestSession = false;
 let isReloading = false;
 
@@ -96,6 +109,9 @@ const network = new NetworkManager({
     if (data.grid && Array.isArray(data.grid) && data.grid.length === GRID_HEIGHT) {
       applySavedGrid(data.grid, world);
     }
+    lastSubterraneanBiomeId = getBiomeForDepth(
+      Math.max(SURFACE_ROW + 1, Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE))
+    ).id;
     if (typeof data.sharedMoney === 'number' && Number.isFinite(data.sharedMoney) && data.sharedMoney >= MIN_SHARED_MONEY) {
       player.money = Math.trunc(data.sharedMoney);
     }
@@ -549,13 +565,13 @@ function handleStations(dt: number): boolean {
 
   // 1. FUEL PAD (y === 3, x < 3): Refuels and repairs hull
   if (bottomGy === SURFACE_ROW && centerGx < 3 && player.isGrounded) {
-    // A. Fuel replenishment ($0.75 per Litre)
+    // A. Fuel replenishment ($1.00 per Litre)
     if (player.fuel < player.maxFuel) {
       isRefueling = true;
       const fuelNeeded = player.maxFuel - player.fuel;
       const refuelRate = 45; // Litres per second
       const fuelStep = Math.min(fuelNeeded, refuelRate * dt);
-      const costPerLitre = 0.75;
+      const costPerLitre = FUEL_COST_PER_LITRE;
 
       refuelAccumulator += fuelStep * costPerLitre;
       if (refuelAccumulator >= 1) {
@@ -682,8 +698,17 @@ function gameLoop(now: number) {
   }
   updateEffects(deltaTime);
 
-  // 3. Camera Tracking
+  // 3. Camera Tracking & Biome Transition Banner
   updateCamera(deltaTime);
+  const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+  if (centerRow > SURFACE_ROW) {
+    const activeBiome = getBiomeForDepth(centerRow);
+    if (activeBiome.id !== lastSubterraneanBiomeId) {
+      lastSubterraneanBiomeId = activeBiome.id;
+      showBiomeBanner(activeBiome.name, activeBiome.tier, BIOME_ACCENT_COLORS[activeBiome.id] || '#38bdf8');
+      sounds.playBiomeTransition();
+    }
+  }
 
   // Broadcast local player state at 20 Hz
   network.broadcastPlayerState({
@@ -698,15 +723,26 @@ function gameLoop(now: number) {
     drillTier: player.upgrades.drill || 1
   });
 
-  // 4. Rendering (World, Dynamic Boulders, Remote Players, Local Player, then Floating Texts & Shockwaves)
-  renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player, remotePlayers);
+  // 4. Rendering (Camera-Shaken World Layer + Steady HUD Overlays & Mini-Radar)
+  ctx.fillStyle = '#09090b';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const shake = getScreenShakeOffset();
+  ctx.save();
+  if (shake.x !== 0 || shake.y !== 0) {
+    ctx.translate(shake.x, shake.y);
+  }
+  renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player, remotePlayers, false);
   renderBoulders(ctx, cameraY);
   renderRemotePlayers(ctx, remotePlayers, cameraY, canvas.height, deltaTime);
   renderPlayer(ctx, player, cameraY);
   renderEffects(ctx, cameraY);
+  ctx.restore();
+
+  renderScreenOverlays(ctx, canvas.width, canvas.height, player);
+  renderMiniRadar(ctx, world, player, cameraY, canvas.width, canvas.height, remotePlayers);
 
   // 5. Update Top HUD
-  const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
   const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
   uiManager.updateHUD(player, depthMeters, isRefueling);
 

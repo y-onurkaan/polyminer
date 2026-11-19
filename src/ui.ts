@@ -13,7 +13,7 @@ import {
   OreRequirement
 } from './constants';
 import { sounds } from './audio';
-import { addFloatingText } from './effects';
+import { addFloatingText, spawnSparkBurst } from './effects';
 import { emitGameEvent } from './events';
 
 export { UPGRADES, type UpgradeConfig, type OreRequirement };
@@ -797,7 +797,14 @@ export class UIManager {
 
     this.playerRef.money -= nextTierConfig.cost;
     (this.playerRef.upgrades as any)[key] = nextTierConfig.level;
-    sounds.playSellSound();
+    sounds.playUpgradeSound();
+    spawnSparkBurst(this.playerRef.x + 19, this.playerRef.y + 19, '#38bdf8', 16, 150);
+    addFloatingText(
+      this.playerRef.x + 19,
+      this.playerRef.y - 16,
+      `⚡ ${config.name} Sv.${nextTierConfig.level}!`,
+      '#38bdf8'
+    );
 
     emitGameEvent('polyminer:wallet-changed', {
       newMoney: this.playerRef.money,
@@ -1219,7 +1226,7 @@ export class UIManager {
           <br/>• <strong>Hararet Kilidi (%100):</strong> Motor 2.5 saniye kilitlenir, 15 gövde hasarı verir ve zorunlu soğumaya geçer.
           <br/>• <strong>Soğutma:</strong> Kazı/roketi durdurunca radyatörünüz motoru soğutur. Ray/asansörde soğuma 1.6 kat daha hızlıdır. <strong>[T] Tamir Kiti</strong> veya yüzey istasyonu harareti anında sıfırlar.
         </div>
-        <div>⛽ <strong>İkmal & Operasyonel Giderler:</strong> Yüzeyde yakıt $0.75/L, gövde tamiri $1.20/HP'dir. Yeraltında dururken saniyede 0.25 L/s baz rölanti yakıtı harcanır.</div>
+        <div>⛽ <strong>İkmal & Operasyonel Giderler:</strong> Yüzeyde yakıt $1.00/L, gövde tamiri $1.20/HP'dir. Yeraltında dururken saniyede 0.35 L/s baz rölanti yakıtı harcanır.</div>
         <div>🧪 <strong>Sıkışmış Gaz (Gas Pocket):</strong> Kazılınca patlar (-20 Gövde).</div>
         <div>🌋 <strong>Magma Taşı (Magma Rock):</strong> -25 Gövde hasarı verir ama $250-$600 arası Termal Kristal bonusu kazandırır!</div>
         <div>👑 <strong>550m Kadim Çekirdek (Ancient Core):</strong> Haritanın en dibindeki 12-Gen kutsal çekirdek (+$50,000 & Zafer Ekranı!).</div>

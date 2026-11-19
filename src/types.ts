@@ -84,6 +84,20 @@ export interface ShockwaveEffect {
   alpha: number;
 }
 
+export interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  alpha: number;
+  lifetime: number;
+  maxLifetime: number;
+  gravity: number;
+  shape: 'square' | 'circle' | 'spark';
+}
+
 export interface PlayerState {
   x: number;
   y: number;

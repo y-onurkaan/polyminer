@@ -6,19 +6,52 @@ import {
   SURFACE_ROW,
   DEFAULT_RADAR_RADIUS,
   SAFE_LANDING_SPEED,
-  FALL_DAMAGE_FACTOR,
-  DEEP_FALL_THRESHOLD_SPEED,
-  DEEP_FALL_PENALTY_MULTIPLIER,
+  FALL_DAMAGE_MAX_BASE,
+  FALL_DAMAGE_EXPONENT,
+  FALL_BRAKE_MULTIPLIER,
   CONSUMABLES,
   BASE_ELEVATOR_SPEED,
   RELIC_DEFINITIONS,
-  getBiomeTier
+  getBiomeForDepth,
+  getBiomeTier,
+  getUpgradeLevelValue
 } from './constants';
 import { revealTilesAround, revealAdjacentTiles, markWorldDirty } from './world';
 import { sounds } from './audio';
-import { addFloatingText, addShockwave } from './effects';
+import {
+  addFloatingText,
+  addShockwave,
+  spawnBlockBreakBurst,
+  spawnSparkBurst,
+  spawnDustPuff,
+  addScreenShake,
+  addDamageFlash,
+  spawnParticle
+} from './effects';
 import { checkAndTriggerFallingRock } from './boulders';
 import { emitGameEvent } from './events';
+
+let drillChipTimer = 0;
+let thrustDustTimer = 0;
+
+function getTileParticleColor(tile: Tile, gy: number): string {
+  switch (tile.type) {
+    case TileType.ROCK:
+      return '#64748b';
+    case TileType.ORE:
+      return tile.ore?.color || '#facc15';
+    case TileType.GAS_POCKET:
+      return '#a3e635';
+    case TileType.MAGMA_ROCK:
+      return '#f97316';
+    case TileType.CHEST:
+      return '#f59e0b';
+    case TileType.ANCIENT_CORE:
+      return '#ec4899';
+    default:
+      return getBiomeForDepth(gy).dirtColor;
+  }
+}
 
 export const PLAYER_WIDTH = 38;
 export const PLAYER_HEIGHT = 38;
@@ -28,8 +61,9 @@ export const MOVE_SPEED = 190; // px/s
 export const MAX_FALL_SPEED = 760; // px/s (10-block cliff terminal velocity: sqrt(2 * 600 * 480px) = 758.9 px/s)
 export const MAX_FLY_SPEED = -280; // px/s
 export const BASE_THRUSTER_POWER = 1500; // px/s^2
-export const THRUST_FUEL_DRAIN = 3.5; // fuel/sec
-export const DRILL_FUEL_DRAIN = 2.0; // fuel/sec
+export const THRUST_FUEL_DRAIN = 4.2; // fuel/sec
+export const DRILL_FUEL_DRAIN = 2.4; // fuel/sec
+export const IDLE_FUEL_DRAIN = 0.35; // subterranean idle fuel/sec
 
 export type FacingDirection = 'left' | 'right' | 'down';
 
@@ -61,14 +95,15 @@ export function createPlayer(): PlayerExtendedState {
   const startGx = Math.floor(GRID_WIDTH / 2);
   const startX = startGx * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
   const startY = (SURFACE_ROW - 1) * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
+  const initialFuel = getUpgradeLevelValue('fuelTank', 1);
 
   return {
     x: startX,
     y: startY,
     vx: 0,
     vy: 0,
-    fuel: 100,
-    maxFuel: 100,
+    fuel: initialFuel,
+    maxFuel: initialFuel,
     hull: 100,
     maxHull: 100,
     cargo: [] as OreDefinition[],
@@ -156,6 +191,7 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
     def.color
   );
   addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 50, def.color);
+  spawnSparkBurst(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, def.color, 18, 150);
   emitGameEvent('polyminer:relic-discovered', { relicId });
   emitGameEvent('polyminer:wallet-changed', {
     newMoney: player.money,
@@ -241,6 +277,23 @@ export function deployElevatorRail(player: PlayerExtendedState, world: Tile[][])
  */
 export function getDamageReductionFactor(hullLevel: number = 1): number {
   return Math.max(0.60, 1.0 - (Math.max(1, hullLevel) - 1) * 0.10);
+}
+
+/**
+ * Computes fall damage using a smooth power curve above SAFE_LANDING_SPEED,
+ * scaled by hull armor upgrades and the Obsidian Tablet relic.
+ */
+export function computeFallDamage(
+  impactSpeed: number,
+  hullLevel: number = 1,
+  hasObsidianTablet: boolean = false
+): number {
+  if (impactSpeed <= SAFE_LANDING_SPEED) return 0;
+  const span = Math.max(1, MAX_FALL_SPEED - SAFE_LANDING_SPEED);
+  const ratio = Math.min(1, (impactSpeed - SAFE_LANDING_SPEED) / span);
+  const baseDamage = FALL_DAMAGE_MAX_BASE * Math.pow(ratio, FALL_DAMAGE_EXPONENT);
+  const armorFactor = getDamageReductionFactor(hullLevel) * (hasObsidianTablet ? 0.75 : 1.0);
+  return Math.round(baseDamage * armorFactor);
 }
 
 /**
@@ -409,15 +462,19 @@ export function openChest(
   player.inventory[granted]++;
 
   sounds.playVictoryFanfare();
+  const chestX = gx * TILE_SIZE + TILE_SIZE / 2;
+  const chestY = gy * TILE_SIZE + TILE_SIZE / 2;
+  spawnSparkBurst(chestX, chestY, '#facc15', 18, 160);
+  addScreenShake(2.5, 0.12);
   addFloatingText(
-    gx * TILE_SIZE + TILE_SIZE / 2,
-    gy * TILE_SIZE + TILE_SIZE / 2 - 12,
+    chestX,
+    chestY - 12,
     `📦 TERK EDİLMİŞ SANDIK! +$${cashReward}`,
     '#facc15'
   );
   addFloatingText(
-    gx * TILE_SIZE + TILE_SIZE / 2,
-    gy * TILE_SIZE + TILE_SIZE / 2 + 8,
+    chestX,
+    chestY + 8,
     `+1 ${CONSUMABLES[granted].name}`,
     '#4ade80'
   );
@@ -498,6 +555,9 @@ export function triggerOverheatLockout(player: PlayerExtendedState): void {
     '#ef4444'
   );
   addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 40, '#ef4444');
+  addScreenShake(5.5, 0.24);
+  addDamageFlash(0.35);
+  spawnDustPuff(player.x + PLAYER_WIDTH / 2, player.y, '#e2e8f0', 8);
   player.isDrilling = false;
   player.isStruggling = false;
   player.drillProgress = 0;
@@ -635,6 +695,33 @@ export function updatePlayer(
       return;
     }
 
+    sounds.updateDrillModulation(player.drillProgress, isStruggling, overdriveMult > 1);
+    drillChipTimer += dt;
+    if (drillChipTimer >= 0.075) {
+      drillChipTimer = 0;
+      const chipColor = getTileParticleColor(targetTile!, gy);
+      const contactX =
+        player.facing === 'left'
+          ? player.x - 2
+          : player.facing === 'right'
+            ? player.x + w + 2
+            : player.x + w / 2;
+      const contactY = player.facing === 'down' ? player.y + h + 2 : player.y + h / 2;
+      for (let i = 0; i < 2; i++) {
+        spawnParticle({
+          x: contactX + (Math.random() - 0.5) * 8,
+          y: contactY + (Math.random() - 0.5) * 8,
+          vx: (Math.random() - 0.5) * 90,
+          vy: -40 - Math.random() * 60,
+          size: 2 + Math.random() * 2,
+          color: chipColor,
+          lifetime: 0.28 + Math.random() * 0.18,
+          gravity: 320,
+          shape: isStruggling ? 'spark' : 'square'
+        });
+      }
+    }
+
     // Zorlanarak kazıda anlık görsel ve metinsel geri bildirim
     if (isStruggling && Math.random() < 0.04) {
       addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, '⚠️ ZORLANIYOR (%50 HIZ)', '#facc15');
@@ -645,8 +732,19 @@ export function updatePlayer(
       sounds.stopDrill();
       player.isStruggling = false;
 
+      const tileCenterX = gx * TILE_SIZE + TILE_SIZE / 2;
+      const tileCenterY = gy * TILE_SIZE + TILE_SIZE / 2;
+
+      // 0. Plain DIRT shatter
+      if (targetTile!.type === TileType.DIRT) {
+        sounds.playBlockBreak('dirt');
+        spawnBlockBreakBurst(tileCenterX, tileCenterY, getBiomeForDepth(gy).dirtColor, 8);
+      }
       // 1. ORE Collection
-      if (targetTile!.type === TileType.ORE && targetTile!.ore) {
+      else if (targetTile!.type === TileType.ORE && targetTile!.ore) {
+        sounds.playBlockBreak('ore');
+        spawnBlockBreakBurst(tileCenterX, tileCenterY, getBiomeForDepth(gy).dirtColor, 6);
+        spawnSparkBurst(tileCenterX, tileCenterY, targetTile!.ore.color, 10);
         if (player.cargo.length < player.maxCargo) {
           player.cargo.push(targetTile!.ore);
           sounds.playGemCollect(targetTile!.ore.sides);
@@ -669,6 +767,9 @@ export function updatePlayer(
         player.vx = player.facing === 'left' ? 140 : player.facing === 'right' ? -140 : 0;
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 16, `-${damage} GAZ PATLAMASI!`, '#ef4444');
         sounds.playExplosion();
+        spawnSparkBurst(tileCenterX, tileCenterY, '#a3e635', 16, 170);
+        addScreenShake(7.5, 0.28);
+        addDamageFlash(0.42);
       }
       // 3. MAGMA ROCK Thermal Burn & Crystal Cash Bonus
       else if (targetTile!.type === TileType.MAGMA_ROCK) {
@@ -680,6 +781,9 @@ export function updatePlayer(
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, `-${damage} ISI HASARI!`, '#ef4444');
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 8, `+$${bonus} TERMAL KRİSTAL`, '#f59e0b');
         sounds.playSteamSizzle();
+        spawnSparkBurst(tileCenterX, tileCenterY, '#f97316', 16, 150);
+        addScreenShake(5.5, 0.22);
+        addDamageFlash(0.35);
         emitGameEvent('polyminer:wallet-changed', {
           newMoney: player.money,
           changeAmount: bonus,
@@ -689,7 +793,10 @@ export function updatePlayer(
       // 4. Broken Hard Rock
       else if (targetTile!.type === TileType.ROCK) {
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, 'KAYA PARÇALANDI!', '#94a3b8');
+        sounds.playBlockBreak('rock');
         sounds.playImpactSound(200);
+        spawnBlockBreakBurst(tileCenterX, tileCenterY, '#64748b', 14);
+        addScreenShake(3.2, 0.14);
       }
       // 5. ANCIENT CORE Boss / Endgame Victory!
       else if (targetTile!.type === TileType.ANCIENT_CORE) {
@@ -698,6 +805,8 @@ export function updatePlayer(
           player.cargo.push(targetTile!.ore);
         }
         sounds.playVictoryFanfare();
+        spawnSparkBurst(tileCenterX, tileCenterY, '#ec4899', 28, 220);
+        addScreenShake(12, 0.50);
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 20, '🏆 KADİM ÇEKİRDEK FETHEDİLDİ! +$50,000', '#ec4899');
         player.hasWon = true;
         emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
@@ -756,11 +865,11 @@ export function updatePlayer(
   const currentDepthRow = Math.floor((player.y + h / 2) / TILE_SIZE);
   const currentBiomeTier = getBiomeTier(currentDepthRow);
 
-  // Subterranean idle fuel drain (0.25 L/s) when underground and not on elevator
+  // Subterranean idle fuel drain when underground and not on elevator
   const isUnderground = player.y > (SURFACE_ROW + 0.5) * TILE_SIZE;
   if (isUnderground && !player.isInElevator && !player.elevatorAuto) {
     const amberMult = player.discoveredRelics?.includes('amber') ? 0.85 : 1.0;
-    player.fuel = Math.max(0, player.fuel - 0.25 * amberMult * dt);
+    player.fuel = Math.max(0, player.fuel - IDLE_FUEL_DRAIN * amberMult * dt);
   }
 
   // Forced Cooldown if in Overheat Lockout (2.5s)
@@ -915,7 +1024,11 @@ export function updatePlayer(
         if (player.isGrounded && player.vy >= 0) {
           player.vy = -140; // Immediate liftoff impulse
         }
-        player.vy -= player.thrusterPower * dt;
+        const isBrakingFall = player.vy > 120;
+        const effectiveThrust = isBrakingFall
+          ? player.thrusterPower * FALL_BRAKE_MULTIPLIER
+          : player.thrusterPower;
+        player.vy -= effectiveThrust * dt;
         if (player.vy < MAX_FLY_SPEED) {
           player.vy = MAX_FLY_SPEED;
         }
@@ -923,6 +1036,23 @@ export function updatePlayer(
         player.heat = Math.min(100, player.heat + 10.0 * dt); // Rocket thrust builds heat
         player.isThrusting = true;
         sounds.startThrust();
+        thrustDustTimer += dt;
+        if (thrustDustTimer >= 0.06) {
+          thrustDustTimer = 0;
+          spawnParticle({
+            x: player.x + w / 2 + (Math.random() - 0.5) * 14,
+            y: player.y + h + 4,
+            vx: (Math.random() - 0.5) * 45,
+            vy: 55 + Math.random() * 45,
+            size: isBrakingFall ? 3 + Math.random() * 1.5 : 2.5 + Math.random() * 2,
+            color: isBrakingFall
+              ? (Math.random() > 0.45 ? '#38bdf8' : '#facc15')
+              : (Math.random() > 0.4 ? '#f97316' : '#94a3b8'),
+            lifetime: 0.28,
+            gravity: 40,
+            shape: 'circle'
+          });
+        }
       } else {
         if (player.isThrusting) {
           player.isThrusting = false;
@@ -1021,19 +1151,26 @@ export function updatePlayer(
     }
     if (hit) {
       // Fall Damage Calculation (Elevator eliminates fall damage)
-      if (previousVy > SAFE_LANDING_SPEED && !player.isInElevator && !player.elevatorAuto) {
-        const excessSpeed = previousVy - SAFE_LANDING_SPEED;
-        // Drops from 3+ blocks (excessSpeed >= DEEP_FALL_THRESHOLD_SPEED, ~144+ px) receive an additional +20% penalty
-        const deepFallMult = excessSpeed >= DEEP_FALL_THRESHOLD_SPEED ? DEEP_FALL_PENALTY_MULTIPLIER : 1.0;
-        const baseDamage = Math.round(excessSpeed * FALL_DAMAGE_FACTOR * deepFallMult);
-        const tabletMult = player.discoveredRelics?.includes('obsidian_tablet') ? 0.75 : 1.0;
-        const damage = Math.round(baseDamage * getDamageReductionFactor(player.upgrades.hull) * tabletMult);
+      let landedDamage = 0;
+      if (!player.isInElevator && !player.elevatorAuto) {
+        const damage = computeFallDamage(
+          previousVy,
+          player.upgrades.hull,
+          !!player.discoveredRelics?.includes('obsidian_tablet')
+        );
         if (damage > 0) {
+          landedDamage = damage;
           player.hull = Math.max(0, player.hull - damage);
           sounds.playImpactSound(damage);
           addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 12, `-${damage} DARBE`, '#ef4444');
           addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT, Math.min(45, 18 + damage * 0.4), '#ef4444');
+          addScreenShake(Math.min(7.5, 2.2 + damage * 0.12), 0.22);
+          addDamageFlash(Math.min(0.48, 0.18 + damage * 0.008));
+          spawnDustPuff(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT, '#94a3b8', 8);
         }
+      }
+      if (landedDamage === 0 && previousVy > 95 && !player.isInElevator && !player.elevatorAuto) {
+        spawnDustPuff(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT, '#94a3b8', 4);
       }
 
       player.y = bottomRow * TILE_SIZE - h;
@@ -1380,8 +1517,11 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
     markWorldDirty();
   }
 
-  // Shockwave & Bass Explosion Audio
+  // Shockwave, Particle Bursts, Screen Shake & Bass Explosion Audio
   addShockwave(blastPxX, blastPxY, 110, '#facc15');
+  addScreenShake(10.5, 0.36);
+  spawnSparkBurst(blastPxX, blastPxY, '#facc15', 22, 220);
+  spawnBlockBreakBurst(blastPxX, blastPxY, '#64748b', 14);
   sounds.playExplosion();
   addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 18, '💥 SİSMİK DİNAMİT!', '#facc15');
 
