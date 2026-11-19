@@ -1,7 +1,70 @@
 import { PlayerExtendedState } from './player';
 import { Tile, TileType } from './types';
-import { ORE_DEFINITIONS, getUpgradeLevelValue } from './constants';
+import {
+  GRID_WIDTH,
+  GRID_HEIGHT,
+  ORE_DEFINITIONS,
+  RELIC_DEFINITIONS,
+  getUpgradeLevelValue
+} from './constants';
 import { computeTileHardness, markWorldDirty } from './world';
+
+export const VALID_TILE_TYPES: Set<number> = new Set([
+  TileType.EMPTY,
+  TileType.DIRT,
+  TileType.ROCK,
+  TileType.ORE,
+  TileType.SHOP_PAD,
+  TileType.FUEL_PAD,
+  TileType.GAS_POCKET,
+  TileType.MAGMA_ROCK,
+  TileType.ANCIENT_CORE,
+  TileType.CHEST
+]);
+
+export function isValidTileType(t: unknown): t is TileType {
+  return typeof t === 'number' && VALID_TILE_TYPES.has(t);
+}
+
+export function isValidSavedGrid(grid: unknown): grid is SavedTile[][] {
+  if (!Array.isArray(grid) || grid.length !== GRID_HEIGHT) {
+    return false;
+  }
+
+  for (let y = 0; y < GRID_HEIGHT; y++) {
+    const row = grid[y];
+    if (!Array.isArray(row) || row.length !== GRID_WIDTH) {
+      return false;
+    }
+    for (let x = 0; x < GRID_WIDTH; x++) {
+      const cell = row[x];
+      if (!cell || typeof cell !== 'object') {
+        return false;
+      }
+      if (!Number.isInteger(cell.t) || !isValidTileType(cell.t)) {
+        return false;
+      }
+      if (cell.r !== 0 && cell.r !== 1) {
+        return false;
+      }
+      if (cell.o !== undefined) {
+        if (typeof cell.o !== 'string' || !Object.hasOwn(ORE_DEFINITIONS, cell.o)) {
+          return false;
+        }
+      }
+      if (cell.m !== undefined) {
+        if (typeof cell.m !== 'string' || !Object.hasOwn(RELIC_DEFINITIONS, cell.m)) {
+          return false;
+        }
+      }
+      if (cell.e !== undefined && cell.e !== 1) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
 
 export const SAVE_KEY = 'polyminer_save_v1';
 export const SAVE_KEY_COOP = 'polyminer_save_coop_v1';
@@ -140,6 +203,10 @@ export function migrateSaveData(raw: unknown): SaveData | null {
     return null;
   }
 
+  if (d.grid.length > 0 && !isValidSavedGrid(d.grid)) {
+    return null;
+  }
+
   const p = d.player;
   const rawUpgrades = p.upgrades && typeof p.upgrades === 'object' ? p.upgrades : {};
   const upgrades: PlayerExtendedState['upgrades'] = {
@@ -187,7 +254,9 @@ export function migrateSaveData(raw: unknown): SaveData | null {
     maxFuel,
     hull: typeof p.hull === 'number' && Number.isFinite(p.hull) ? Math.max(0, Math.min(maxHull, p.hull)) : maxHull,
     maxHull,
-    cargo: Array.isArray(p.cargo) ? p.cargo.filter((c: any) => typeof c === 'string') : [],
+    cargo: Array.isArray(p.cargo)
+      ? p.cargo.filter((c: unknown): c is string => typeof c === 'string' && Object.hasOwn(ORE_DEFINITIONS, c))
+      : [],
     maxCargo,
     money: typeof p.money === 'number' && Number.isFinite(p.money)
       ? Math.max(-100_000, Math.min(1e9, Math.trunc(p.money)))
@@ -198,7 +267,9 @@ export function migrateSaveData(raw: unknown): SaveData | null {
     upgrades,
     inventory,
     heat: typeof p.heat === 'number' && Number.isFinite(p.heat) ? Math.max(0, Math.min(100, Math.round(p.heat))) : 0,
-    discoveredRelics: Array.isArray(p.discoveredRelics) ? p.discoveredRelics.filter((r: any) => typeof r === 'string') : [],
+    discoveredRelics: Array.isArray(p.discoveredRelics)
+      ? p.discoveredRelics.filter((r: unknown): r is string => typeof r === 'string' && Object.hasOwn(RELIC_DEFINITIONS, r))
+      : [],
     museumRewardClaimed: !!p.museumRewardClaimed
   };
 
@@ -279,15 +350,18 @@ export function applyLoadedGame(
     elevatorRails: normalizeNonNegInt(saveData.player.inventory?.elevatorRails)
   };
   player.hasWon = !!saveData.hasWon;
-  player.discoveredRelics = Array.isArray(saveData.player.discoveredRelics) ? [...saveData.player.discoveredRelics] : [];
+  player.discoveredRelics = Array.isArray(saveData.player.discoveredRelics)
+    ? saveData.player.discoveredRelics.filter((r): r is string => typeof r === 'string' && Object.hasOwn(RELIC_DEFINITIONS, r))
+    : [];
   player.museumRewardClaimed = !!saveData.player.museumRewardClaimed;
 
   // Restore Cargo
   player.cargo = [];
   if (Array.isArray(saveData.player.cargo)) {
     for (const oreId of saveData.player.cargo) {
-      const def = ORE_DEFINITIONS[oreId];
-      if (def) player.cargo.push(def);
+      if (typeof oreId === 'string' && Object.hasOwn(ORE_DEFINITIONS, oreId)) {
+        player.cargo.push(ORE_DEFINITIONS[oreId]);
+      }
     }
   }
 
@@ -317,14 +391,17 @@ export function applySavedGrid(savedGrid: SavedTile[][], world: Tile[][]): void 
       const targetTile = worldRow[x];
       if (!savedTile || typeof savedTile !== 'object' || !targetTile) continue;
 
-      if (typeof savedTile.t === 'number') {
-        targetTile.type = savedTile.t as TileType;
+      if (Number.isInteger(savedTile.t) && isValidTileType(savedTile.t)) {
+        targetTile.type = savedTile.t;
       }
       targetTile.revealed = savedTile.r === 1;
       targetTile.hasElevator = savedTile.e === 1;
-      targetTile.relicId = typeof savedTile.m === 'string' ? savedTile.m : undefined;
+      targetTile.relicId =
+        typeof savedTile.m === 'string' && Object.hasOwn(RELIC_DEFINITIONS, savedTile.m)
+          ? savedTile.m
+          : undefined;
 
-      if (savedTile.o && typeof savedTile.o === 'string' && ORE_DEFINITIONS[savedTile.o]) {
+      if (savedTile.o && typeof savedTile.o === 'string' && Object.hasOwn(ORE_DEFINITIONS, savedTile.o)) {
         targetTile.ore = ORE_DEFINITIONS[savedTile.o];
       } else {
         delete targetTile.ore;

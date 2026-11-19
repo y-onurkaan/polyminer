@@ -500,7 +500,6 @@ describe('Polyminer Faz B Architecture, Cache & Tier Tests', () => {
       });
 
       emitGameEvent('polyminer:wallet-changed', {
-        newMoney: 750,
         changeAmount: 250,
         reason: 'Test Kazanç'
       });
@@ -513,7 +512,6 @@ describe('Polyminer Faz B Architecture, Cache & Tier Tests', () => {
       offClaim();
 
       emitGameEvent('polyminer:wallet-changed', {
-        newMoney: 800,
         changeAmount: 50,
         reason: 'Unsubscribed'
       });

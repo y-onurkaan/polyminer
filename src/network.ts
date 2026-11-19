@@ -1,11 +1,14 @@
 import { Peer, DataConnection } from 'peerjs';
 import { RemotePlayerState, TileType } from './types';
-import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, RELIC_DEFINITIONS, ORE_DEFINITIONS } from './constants';
-import { SavedTile } from './save';
+import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, RELIC_DEFINITIONS } from './constants';
+import { VALID_TILE_TYPES, isValidTileType, isValidSavedGrid } from './save';
+
+export { VALID_TILE_TYPES, isValidTileType, isValidSavedGrid };
 
 export const MIN_SHARED_MONEY = -100_000;
 export const MAX_DEBT_ALLOWED = -1000;
 export const MAX_SHARED_MONEY = 1e9;
+export const ROOM_CODE_RE = /^POLY-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4,6}$/;
 
 export interface RosterPlayer {
   id: string;
@@ -20,6 +23,7 @@ export interface NetworkCallbacks {
   getSharedMoney?: () => number;
   getDiscoveredRelics?: () => string[];
   getMuseumRewardClaimed?: () => boolean;
+  canAcceptVictory?: () => boolean;
   onWelcomeSync?: (data: {
     grid: any[][];
     sharedMoney: number;
@@ -29,7 +33,14 @@ export interface NetworkCallbacks {
   onRemotePlayerUpdate?: (player: RemotePlayerState) => void;
   onRemotePlayerLeave?: (id: string) => void;
   onTileUpdate?: (data: { gx: number; gy: number; tileType: TileType; hasElevator?: boolean; sourcePlayerName?: string }) => void;
-  onSharedWalletUpdate?: (data: { money: number; changeAmount: number; reason: string; actorName: string }) => void;
+  onSharedWalletUpdate?: (data: {
+    money: number;
+    changeAmount: number;
+    reason: string;
+    actorName: string;
+    rejected?: boolean;
+    txId?: string;
+  }) => void;
   onSharedRelicUpdate?: (data: { relicId: string; actorName: string }) => void;
   onMuseumRewardClaimed?: (data: { actorName: string; grantLocally: boolean }) => void;
   onVictory?: (data: { winnerName: string }) => void;
@@ -49,73 +60,45 @@ export function sanitizeColor(raw: unknown, fallback: string = '#00f2fe'): strin
   return typeof raw === 'string' && HEX_COLOR_RE.test(raw) ? raw : fallback;
 }
 
+export function normalizeRoomCode(raw: string): string | null {
+  if (typeof raw !== 'string') return null;
+  let target = raw.trim().toUpperCase();
+  if (!target) return null;
+  if (!target.startsWith('POLY-')) {
+    target = `POLY-${target}`;
+  }
+  return ROOM_CODE_RE.test(target) ? target : null;
+}
+
 export const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 export const isInt = (v: unknown): v is number => Number.isInteger(v);
 export const isValidWalletDelta = (delta: unknown): delta is number =>
   isFiniteNum(delta) && Math.abs(delta) <= 1e7 && Math.trunc(delta) !== 0;
 
-export const VALID_TILE_TYPES: Set<number> = new Set([
-  TileType.EMPTY,
-  TileType.DIRT,
-  TileType.ROCK,
-  TileType.ORE,
-  TileType.SHOP_PAD,
-  TileType.FUEL_PAD,
-  TileType.GAS_POCKET,
-  TileType.MAGMA_ROCK,
-  TileType.ANCIENT_CORE,
-  TileType.CHEST
-]);
-
-export function isValidTileType(t: unknown): t is TileType {
-  return typeof t === 'number' && VALID_TILE_TYPES.has(t);
-}
-
-export function isValidSavedGrid(grid: unknown): grid is SavedTile[][] {
-  if (!Array.isArray(grid) || grid.length !== GRID_HEIGHT) {
-    return false;
+export function evaluateWalletDelta(
+  currentMoney: number,
+  changeAmount: unknown,
+  allowDebt: boolean
+): { accepted: boolean; newMoney: number; delta: number } {
+  const safeCurrent = isFiniteNum(currentMoney) ? Math.trunc(currentMoney) : 0;
+  if (!isValidWalletDelta(changeAmount)) {
+    return { accepted: false, newMoney: safeCurrent, delta: 0 };
   }
+  const delta = Math.trunc(changeAmount);
+  const newMoney = safeCurrent + delta;
+  const minAllowed = delta > 0 ? MIN_SHARED_MONEY : (allowDebt ? MAX_DEBT_ALLOWED : 0);
 
-  for (let y = 0; y < GRID_HEIGHT; y++) {
-    const row = grid[y];
-    if (!Array.isArray(row) || row.length !== GRID_WIDTH) {
-      return false;
-    }
-    for (let x = 0; x < GRID_WIDTH; x++) {
-      const cell = row[x];
-      if (!cell || typeof cell !== 'object') {
-        return false;
-      }
-      if (!isInt(cell.t) || !isValidTileType(cell.t)) {
-        return false;
-      }
-      if (cell.r !== 0 && cell.r !== 1) {
-        return false;
-      }
-      if (cell.o !== undefined) {
-        if (typeof cell.o !== 'string' || !(cell.o in ORE_DEFINITIONS)) {
-          return false;
-        }
-      }
-      if (cell.m !== undefined) {
-        if (typeof cell.m !== 'string' || !(cell.m in RELIC_DEFINITIONS)) {
-          return false;
-        }
-      }
-      if (cell.e !== undefined && cell.e !== 1) {
-        return false;
-      }
-    }
+  if (newMoney < minAllowed || newMoney > MAX_SHARED_MONEY) {
+    return { accepted: false, newMoney: safeCurrent, delta: 0 };
   }
-
-  return true;
+  return { accepted: true, newMoney, delta };
 }
 
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   let code = '';
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return code;
@@ -185,20 +168,25 @@ export class NetworkManager {
   }
 
   /**
-   * Create a new Co-op Room as Host (POLY-XXXX).
+   * Create a new Co-op Room as Host (POLY-XXXXXX), retrying on ID collision.
    */
-  public createRoom(onReady?: (code: string) => void, onError?: (err: any) => void) {
-    this.disconnect();
+  public createRoom(onReady?: (code: string) => void, onError?: (err: any) => void, attempt: number = 0) {
+    if (attempt === 0) {
+      this.disconnect();
+    }
     this.isHost = true;
     const code = generateRoomCode();
     const peerId = `POLY-${code}`;
+    let retrying = false;
 
     this.callbacks.onStatusChange?.('Sunucuya bağlanılıyor...', false, 1);
 
     try {
-      this.peer = new Peer(peerId, { debug: 1 });
+      const peer = new Peer(peerId, { debug: 1 });
+      this.peer = peer;
 
-      this.peer.on('open', (id) => {
+      peer.on('open', (id) => {
+        if (this.peer !== peer) return;
         this.roomCode = peerId;
         this.isConnected = true;
         this.roster.clear();
@@ -213,17 +201,26 @@ export class NetworkManager {
         onReady?.(peerId);
       });
 
-      this.peer.on('connection', (conn) => {
+      peer.on('connection', (conn) => {
         this.handleIncomingConnection(conn);
       });
 
-      this.peer.on('error', (err) => {
+      peer.on('error', (err) => {
+        if (err?.type === 'unavailable-id' && attempt < 2) {
+          retrying = true;
+          try {
+            peer.destroy();
+          } catch (_) {}
+          this.createRoom(onReady, onError, attempt + 1);
+          return;
+        }
         console.error('[P2P Net] Host Peer error:', err);
         this.callbacks.onStatusChange?.(`Hata: ${err.type || 'Bağlantı hatası'}`, false, 0);
         onError?.(err);
       });
 
-      this.peer.on('close', () => {
+      peer.on('close', () => {
+        if (retrying || this.peer !== peer) return;
         this.handleDisconnect();
       });
     } catch (e) {
@@ -235,12 +232,15 @@ export class NetworkManager {
    * Join an existing Co-op Room as Client.
    */
   public joinRoom(roomInput: string, onConnected?: () => void, onError?: (err: any) => void) {
+    const target = normalizeRoomCode(roomInput);
+    if (!target) {
+      this.callbacks.onStatusChange?.('Geçersiz oda kodu formatı', false, 0);
+      onError?.({ type: 'invalid-room-code' });
+      return;
+    }
+
     this.disconnect();
     this.isHost = false;
-    let target = roomInput.trim().toUpperCase();
-    if (!target.startsWith('POLY-')) {
-      target = `POLY-${target}`;
-    }
 
     this.callbacks.onStatusChange?.('Odaya bağlanılıyor...', false, 0);
 
@@ -377,6 +377,13 @@ export class NetworkManager {
     });
   }
 
+  /**
+   * Public test hook delegating to validated incoming packet routing.
+   */
+  public handleIncomingPacket(packet: unknown, sourceConn: DataConnection): void {
+    this.handlePacket(packet, sourceConn);
+  }
+
   private handlePacket(packet: any, sourceConn: DataConnection) {
     if (!packet || typeof packet !== 'object' || typeof packet.type !== 'string') return;
 
@@ -436,7 +443,7 @@ export class NetworkManager {
               ? Math.trunc(sharedMoney)
               : 0;
           const safeRelics = Array.isArray(discoveredRelics)
-            ? discoveredRelics.filter((id: unknown) => typeof id === 'string' && id in RELIC_DEFINITIONS)
+            ? discoveredRelics.filter((id: unknown): id is string => typeof id === 'string' && Object.hasOwn(RELIC_DEFINITIONS, id))
             : [];
           this.museumRewardClaimed = !!museumRewardClaimed;
           this.callbacks.onWelcomeSync?.({
@@ -532,26 +539,25 @@ export class NetworkManager {
         const p = packet.payload;
         if (!p || typeof p !== 'object') break;
         if (!isValidWalletDelta(p.changeAmount)) break;
-        const changeAmount = Math.trunc(p.changeAmount);
         const allowDebt = !!p.allowDebt;
+        const safeTxId = typeof p.txId === 'string' ? p.txId.slice(0, 32) : undefined;
 
         const currentMoney = this.callbacks.getSharedMoney?.() ?? 0;
-        const newMoney = currentMoney + changeAmount;
-        const minAllowed = changeAmount > 0
-          ? MIN_SHARED_MONEY
-          : (allowDebt && changeAmount >= -500 ? MAX_DEBT_ALLOWED : 0);
+        const evaluation = evaluateWalletDelta(currentMoney, p.changeAmount, allowDebt);
 
         // Spending is rejected if balance would breach limit; push authoritative balance back to requester
-        if (newMoney < minAllowed || newMoney > MAX_SHARED_MONEY) {
+        if (!evaluation.accepted) {
           try {
             if (sourceConn.open) {
               sourceConn.send({
                 type: 'SHARED_WALLET_UPDATE',
                 payload: {
-                  money: Math.trunc(currentMoney),
+                  money: evaluation.newMoney,
                   changeAmount: 0,
                   reason: 'Yetersiz Bakiye (Reddedildi)',
-                  actorName: 'Sistem'
+                  actorName: 'Sistem',
+                  rejected: true,
+                  txId: safeTxId
                 }
               });
             }
@@ -564,10 +570,12 @@ export class NetworkManager {
         const safeReason = typeof p.reason === 'string' ? p.reason.slice(0, 40) : 'Ortak İşlem';
 
         const validatedWallet = {
-          money: Math.trunc(newMoney),
-          changeAmount,
+          money: evaluation.newMoney,
+          changeAmount: evaluation.delta,
           reason: safeReason,
-          actorName: safeActorName
+          actorName: safeActorName,
+          rejected: false,
+          txId: safeTxId
         };
 
         // Host updates its own local state & UI
@@ -596,7 +604,9 @@ export class NetworkManager {
           money: Math.trunc(p.money),
           changeAmount: Math.trunc(p.changeAmount),
           reason: safeReason,
-          actorName: safeActorName
+          actorName: safeActorName,
+          rejected: !!p.rejected,
+          txId: typeof p.txId === 'string' ? p.txId.slice(0, 32) : undefined
         };
 
         this.callbacks.onSharedWalletUpdate?.(validatedWallet);
@@ -606,6 +616,11 @@ export class NetworkManager {
       case 'MUSEUM_REWARD_CLAIM_REQUEST': {
         if (!this.isHost) break;
         if (this.museumRewardClaimed || this.callbacks.getMuseumRewardClaimed?.()) break;
+        const discovered = this.callbacks.getDiscoveredRelics?.() ?? [];
+        const validUniqueCount = new Set(
+          discovered.filter(id => typeof id === 'string' && Object.hasOwn(RELIC_DEFINITIONS, id))
+        ).size;
+        if (validUniqueCount < Object.keys(RELIC_DEFINITIONS).length) break;
         this.museumRewardClaimed = true;
 
         const rosterEntry = this.roster.get(sourceConn.peer);
@@ -630,7 +645,7 @@ export class NetworkManager {
       case 'SHARED_RELIC_UPDATE': {
         const p = packet.payload;
         if (!p || typeof p !== 'object' || typeof p.relicId !== 'string') break;
-        if (!(p.relicId in RELIC_DEFINITIONS)) break;
+        if (!Object.hasOwn(RELIC_DEFINITIONS, p.relicId)) break;
 
         const rosterEntry = this.roster.get(sourceConn.peer);
         const safeActorName = this.isHost
@@ -657,8 +672,9 @@ export class NetworkManager {
         if (!p || typeof p !== 'object') break;
 
         if (this.isHost) {
-          // Host allows only ONE victory event per room session
+          // Host allows only ONE victory event per room session and checks Core status if configured
           if (this.victoryDeclared) break;
+          if (this.callbacks.canAcceptVictory && !this.callbacks.canAcceptVictory()) break;
           this.victoryDeclared = true;
 
           const rosterEntry = this.roster.get(sourceConn.peer);
@@ -788,22 +804,30 @@ export class NetworkManager {
    * Host authoritatively aggregates deltas and broadcasts the new total.
    * Guest sends delta request to Host for authoritative validation.
    */
-  public sendWalletDelta(changeAmount: number, reason: string, allowDebt: boolean = false) {
+  public sendWalletDelta(changeAmount: number, reason: string, allowDebt: boolean = false, txId?: string) {
     if (!this.isConnected) return;
     if (!isValidWalletDelta(changeAmount)) return;
 
     const delta = Math.trunc(changeAmount);
     const safeReason = typeof reason === 'string' ? reason.slice(0, 40) : 'Ortak İşlem';
+    const safeTxId = typeof txId === 'string' ? txId.slice(0, 32) : undefined;
 
     if (this.isHost) {
       const currentMoney = this.callbacks.getSharedMoney?.() ?? 0;
+      const safeMoney = clamp(
+        isFiniteNum(currentMoney) ? Math.trunc(currentMoney) : 0,
+        MIN_SHARED_MONEY,
+        MAX_SHARED_MONEY
+      );
       this.broadcast({
         type: 'SHARED_WALLET_UPDATE',
         payload: {
-          money: Math.trunc(currentMoney),
+          money: safeMoney,
           changeAmount: delta,
           reason: safeReason,
-          actorName: this.localName
+          actorName: this.localName,
+          rejected: false,
+          txId: safeTxId
         }
       });
     } else {
@@ -812,7 +836,8 @@ export class NetworkManager {
         payload: {
           changeAmount: delta,
           reason: safeReason,
-          allowDebt
+          allowDebt,
+          txId: safeTxId
         }
       });
     }

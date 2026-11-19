@@ -157,6 +157,8 @@ export class UIManager {
   private playerRef: PlayerExtendedState | null = null;
   private onStateChange: (() => void) | null = null;
   private onConsumableClick: ((itemKey: keyof ConsumableInventory) => void) | null = null;
+  private nextTxSeq = 0;
+  private pendingPurchases: Map<string, () => void> = new Map();
 
   constructor() {
     this.depthDisplay = document.getElementById('top-depth') as HTMLElement;
@@ -281,6 +283,10 @@ export class UIManager {
 
     this.btnOpenHelp.addEventListener('click', () => this.showHelp());
     this.btnCloseHelp.addEventListener('click', () => this.hideHelp());
+    const btnCloseHelpFooter = document.getElementById('btn-close-help-footer');
+    if (btnCloseHelpFooter) {
+      btnCloseHelpFooter.addEventListener('click', () => this.hideHelp());
+    }
 
     this.btnToggleSound.addEventListener('click', () => {
       const isMuted = sounds.toggleMute();
@@ -667,7 +673,6 @@ export class UIManager {
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} SATILDI!${bonusLabel}`, '#facc15');
 
     emitGameEvent('polyminer:wallet-changed', {
-      newMoney: this.playerRef.money,
       changeAmount: total,
       reason: 'Tüm Madenleri Sat'
     });
@@ -695,7 +700,6 @@ export class UIManager {
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} ${oreName} (${matching.length}x) Satıldı!${bonusLabel}`, '#facc15');
 
     emitGameEvent('polyminer:wallet-changed', {
-      newMoney: this.playerRef.money,
       changeAmount: total,
       reason: `${oreName} Satışı`
     });
@@ -751,13 +755,42 @@ export class UIManager {
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+$${total} SATILDI! (${toSell.length} maden satıldı, ${keptCargo.length} korundu)${bonusLabel}`, '#facc15');
 
     emitGameEvent('polyminer:wallet-changed', {
-      newMoney: this.playerRef.money,
       changeAmount: total,
       reason: 'Üretim Harici Maden Satışı'
     });
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
+  }
+
+  private registerPendingPurchase(rollback: () => void): string | undefined {
+    if (!this.networkManager?.isConnected || this.networkManager.getIsHost()) {
+      return undefined;
+    }
+    if (this.pendingPurchases.size >= 16) {
+      const oldestKey = this.pendingPurchases.keys().next().value;
+      if (oldestKey) this.pendingPurchases.delete(oldestKey);
+    }
+    const txId = `tx-${++this.nextTxSeq}-${Math.random().toString(36).slice(2, 7)}`;
+    this.pendingPurchases.set(txId, rollback);
+    return txId;
+  }
+
+  public confirmPendingPurchase(txId?: string): void {
+    if (txId) {
+      this.pendingPurchases.delete(txId);
+    }
+  }
+
+  public rollbackPendingPurchase(txId?: string): boolean {
+    if (!txId) return false;
+    const rollback = this.pendingPurchases.get(txId);
+    if (!rollback) return false;
+    this.pendingPurchases.delete(txId);
+    rollback();
+    this.refreshShopIfOpen();
+    this.showToast('❌ Ortak bakiye yetersiz — satın alma geri alındı!', '#ef4444');
+    return true;
   }
 
   private buyUpgrade(key: string) {
@@ -770,6 +803,18 @@ export class UIManager {
     if (!nextTierConfig) return;
     if (this.playerRef.money < nextTierConfig.cost) return;
 
+    const prevStats = {
+      drillSpeed: this.playerRef.drillSpeed,
+      maxFuel: this.playerRef.maxFuel,
+      fuel: this.playerRef.fuel,
+      maxCargo: this.playerRef.maxCargo,
+      thrusterPower: this.playerRef.thrusterPower,
+      radarRadius: this.playerRef.radarRadius,
+      maxHull: this.playerRef.maxHull,
+      hull: this.playerRef.hull
+    };
+    const consumedOres: OreDefinition[] = [];
+
     // Check required ores in cargo
     if (nextTierConfig.oreReqs) {
       for (const [oreId, reqCount] of Object.entries(nextTierConfig.oreReqs)) {
@@ -779,12 +824,13 @@ export class UIManager {
           return;
         }
       }
-      // Consume required ores from cargo
+      // Consume required ores from cargo (keeping exact consumed copies for Co-op rejection rollback)
       for (const [oreId, reqCount] of Object.entries(nextTierConfig.oreReqs)) {
         let toRemove = reqCount;
         this.playerRef.cargo = this.playerRef.cargo.filter(o => {
           if (o.id === oreId && toRemove > 0) {
             toRemove--;
+            consumedOres.push(o);
             return false;
           }
           return true;
@@ -802,12 +848,6 @@ export class UIManager {
       `⚡ ${config.name} Sv.${nextTierConfig.level}!`,
       '#38bdf8'
     );
-
-    emitGameEvent('polyminer:wallet-changed', {
-      newMoney: this.playerRef.money,
-      changeAmount: -nextTierConfig.cost,
-      reason: `${config.name} Seviye ${nextTierConfig.level}`
-    });
 
     switch (key) {
       case 'drill':
@@ -829,20 +869,43 @@ export class UIManager {
       case 'radar':
         this.playerRef.radarRadius = nextTierConfig.value;
         break;
-      case 'hull':
+      case 'hull': {
         const oldMax = this.playerRef.maxHull;
         this.playerRef.maxHull = nextTierConfig.value;
         this.playerRef.hull = Math.min(
-            this.playerRef.maxHull,
-            this.playerRef.hull + (nextTierConfig.value - oldMax)
+          this.playerRef.maxHull,
+          this.playerRef.hull + (nextTierConfig.value - oldMax)
         );
         break;
+      }
       case 'radiator':
         // Radiator level tier updated in playerRef.upgrades
         break;
     }
 
-    addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `${config.name} Seviye ${nextTierConfig.level}!`, '#38bdf8');
+    const targetRef = this.playerRef;
+    const txId = this.registerPendingPurchase(() => {
+      (targetRef.upgrades as any)[key] = currentTier;
+      targetRef.drillSpeed = prevStats.drillSpeed;
+      targetRef.maxFuel = prevStats.maxFuel;
+      targetRef.fuel = Math.min(prevStats.maxFuel, prevStats.fuel);
+      targetRef.maxCargo = prevStats.maxCargo;
+      targetRef.thrusterPower = prevStats.thrusterPower;
+      targetRef.radarRadius = prevStats.radarRadius;
+      targetRef.maxHull = prevStats.maxHull;
+      targetRef.hull = Math.min(prevStats.maxHull, prevStats.hull);
+      for (const ore of consumedOres) {
+        if (targetRef.cargo.length < targetRef.maxCargo) {
+          targetRef.cargo.push(ore);
+        }
+      }
+    });
+
+    emitGameEvent('polyminer:wallet-changed', {
+      changeAmount: -nextTierConfig.cost,
+      reason: `${config.name} Seviye ${nextTierConfig.level}`,
+      txId
+    });
 
     if (this.onStateChange) this.onStateChange();
     this.renderShopContent();
@@ -857,10 +920,17 @@ export class UIManager {
     sounds.playSellSound();
     addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+${result.addedAmount} ${item.name}`, '#4ade80');
 
+    const targetRef = this.playerRef;
+    const addedAmount = result.addedAmount;
+    const txId = this.registerPendingPurchase(() => {
+      const cur = targetRef.inventory[itemKey] || 0;
+      targetRef.inventory[itemKey] = Math.max(0, cur - addedAmount);
+    });
+
     emitGameEvent('polyminer:wallet-changed', {
-      newMoney: this.playerRef.money,
       changeAmount: -result.totalCost,
-      reason: `${item.name} x${count}`
+      reason: `${item.name} x${count}`,
+      txId
     });
 
     if (this.onStateChange) this.onStateChange();
@@ -1375,11 +1445,16 @@ export class UIManager {
     if (this.btnCoopCreateRoom) {
       this.btnCoopCreateRoom.addEventListener('click', () => {
         if (!this.networkManager) return;
+        if (this.networkManager.isConnected && !this.networkManager.getIsHost()) {
+          this.showToast('⚠️ Oda kurmadan önce mevcut odadan ayrılın.', '#f59e0b');
+          return;
+        }
         this.btnCoopCreateRoom!.disabled = true;
         this.btnCoopCreateRoom!.innerText = '⏳ Oda Oluşturuluyor...';
 
         this.networkManager.createRoom(
           (code) => {
+            emitGameEvent('polyminer:host-started');
             this.btnCoopCreateRoom!.disabled = false;
             this.btnCoopCreateRoom!.innerText = '📡 YENİ ODA KUR (HOST)';
             if (this.coopHostInfo) this.coopHostInfo.style.display = 'block';
@@ -1437,7 +1512,10 @@ export class UIManager {
           (err) => {
             this.btnCoopJoinRoom!.disabled = false;
             this.btnCoopJoinRoom!.innerText = 'Bağlan';
-            this.showToast(`❌ Odaya bağlanılamadı (${err?.type || 'Hata'})`, '#ef4444');
+            const msg = err?.type === 'invalid-room-code'
+              ? '⚠️ Geçersiz oda kodu! Örn: A7K9M2 veya POLY-A7K9M2'
+              : `❌ Odaya bağlanılamadı (${err?.type || 'Hata'})`;
+            this.showToast(msg, err?.type === 'invalid-room-code' ? '#f59e0b' : '#ef4444');
           }
         );
       });

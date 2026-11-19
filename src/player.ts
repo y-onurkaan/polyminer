@@ -172,7 +172,6 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
     );
     addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 35, '#f59e0b');
     emitGameEvent('polyminer:wallet-changed', {
-      newMoney: player.money,
       changeAmount: duplicateBonus,
       reason: `Çift Fosil (${def.name})`
     });
@@ -194,7 +193,6 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
   spawnSparkBurst(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, def.color, 18, 150);
   emitGameEvent('polyminer:relic-discovered', { relicId });
   emitGameEvent('polyminer:wallet-changed', {
-    newMoney: player.money,
     changeAmount: firstFindBonus,
     reason: `${def.name} Keşfi`
   });
@@ -490,7 +488,6 @@ export function openChest(
   checkAndTriggerFallingRock(world, gx, gy);
 
   emitGameEvent('polyminer:wallet-changed', {
-    newMoney: player.money,
     changeAmount: cashReward,
     reason: 'Terk Edilmiş Sandık'
   });
@@ -734,6 +731,7 @@ export function updatePlayer(
 
       const tileCenterX = gx * TILE_SIZE + TILE_SIZE / 2;
       const tileCenterY = gy * TILE_SIZE + TILE_SIZE / 2;
+      let conqueredAncientCore = false;
 
       // 0. Plain DIRT shatter
       if (targetTile!.type === TileType.DIRT) {
@@ -785,7 +783,6 @@ export function updatePlayer(
         addScreenShake(5.5, 0.22);
         addDamageFlash(0.35);
         emitGameEvent('polyminer:wallet-changed', {
-          newMoney: player.money,
           changeAmount: bonus,
           reason: 'Termal Kristal'
         });
@@ -809,9 +806,8 @@ export function updatePlayer(
         addScreenShake(12, 0.50);
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 20, '🏆 KADİM ÇEKİRDEK FETHEDİLDİ! +$50,000', '#ec4899');
         player.hasWon = true;
-        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
+        conqueredAncientCore = true;
         emitGameEvent('polyminer:wallet-changed', {
-          newMoney: player.money,
           changeAmount: 50000,
           reason: 'Kadim Çekirdek Fethi'
         });
@@ -841,6 +837,9 @@ export function updatePlayer(
       revealAdjacentTiles(world, gx, gy);
 
       emitGameEvent('polyminer:tile-changed', { gx, gy, tileType: TileType.EMPTY });
+      if (conqueredAncientCore) {
+        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
+      }
 
       // Check if rock above is now unsupported and should fall!
       checkAndTriggerFallingRock(world, gx, gy);
@@ -1475,6 +1474,7 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
       }
 
       // Ancient Core Blasted by Dynamite!
+      let conqueredAncientCore = false;
       if (tile.type === TileType.ANCIENT_CORE) {
         player.money += 50000;
         if (tile.ore && player.cargo.length < player.maxCargo) {
@@ -1488,9 +1488,8 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
           '#ec4899'
         );
         player.hasWon = true;
-        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
+        conqueredAncientCore = true;
         emitGameEvent('polyminer:wallet-changed', {
-          newMoney: player.money,
           changeAmount: 50000,
           reason: 'Kadim Çekirdek Fethi'
         });
@@ -1510,6 +1509,9 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
       checkAndTriggerFallingRock(world, gx, gy);
 
       emitGameEvent('polyminer:tile-changed', { gx, gy, tileType: TileType.EMPTY });
+      if (conqueredAncientCore) {
+        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
+      }
     }
   }
 

@@ -23,9 +23,9 @@ Madenler düzgün çokgen olarak çizilir. **Kenar sayısı arttıkça değeri a
 ## Özellikler
 
 - 4 biyom: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği (550m derinlik)
-- **Online Co-op (P2P WebRTC / PeerJS):** Sunucusuz, oda koduyla (`POLY-XXXX`) arkadaşlarınla birlikte madencilik yapma, ortak şirket kasası, anlık tünel/ray paylaşımı ve özelleştirilebilir Mecha Pod renkleri
-- Gerçekçi düşme hasarı: 1 blok güvenli (0 hasar), 2 blok -30 HP, 3+ blok derin düşüşlerde +%20 ceza, 10 blokta terminal uçurum tavanı
-- Yakıt, gövde hasarı, ısı ve hararet yönetimi
+- **Online Co-op (P2P WebRTC / PeerJS):** Sunucusuz, oda koduyla (`POLY-XXXXXX`) arkadaşlarınla birlikte madencilik yapma, ortak şirket kasası, anlık tünel/ray paylaşımı ve özelleştirilebilir Mecha Pod renkleri
+- Pürüzsüz düşme hasarı ve itici kontrolü: `1` blok düşüş güvenli (`0` hasar), daha yüksek düşüşlerde pürüzsüz üstel hasar eğrisi ve `[W]` ile ekstra `%50` retro-fren yavaşlatması
+- Yakıt (`60L` başlangıç deposu, `$1.00/L`), gövde hasarı, ısı ve hararet yönetimi
 - Dükkân: matkap, gövde, yakıt deposu, radyatör vb. geliştirmeler
 - Sarf malzemeleri: yedek yakıt, tamir kiti, ışınlayıcı, dinamit, asansör rayı ($25)
 - Manyetik asansör rayı ile yakıtsız, hasarsız ve otomatik yukarı/aşağı seyir
@@ -38,13 +38,13 @@ Madenler düzgün çokgen olarak çizilir. **Kenar sayısı arttıkça değeri a
 
 1. Üst bardaki **`[ 🌐 ONLINE CO-OP ]`** butonuna tıkla.
 2. Kullanıcı adını ve Mecha Pod şasi rengini seç.
-3. **Oda Kur (Host):** Tek tıkla `POLY-XXXX` oda kodu üret ve arkadaşına gönder.
+3. **Oda Kur (Host):** Tek tıkla `POLY-XXXXXX` oda kodu üret ve arkadaşına gönder.
 4. **Odaya Katıl (Misafir):** Arkadaşından aldığın kodu girip bağlan.
 
 ### Ağ ve Kayıt Mimarisi
 - **P2P WebRTC:** Tarayıcılar arasında doğrudan eşler arası (PeerJS genel sunucusu üzerinden sinyalleşme ile) iletişim kurulur. TURN röle sunucusu bulunmadığından katı simetrik NAT/kurumsal güvenlik duvarı arkasındaki bazı ağlarda doğrudan bağlantı kurulamayabilir.
-- **Host-Otoriter Ortak Kasa:** Tüm harcama ve maden satışları delta (`changeAmount`) olarak Host'a iletilir ve Host tarafından merkezi olarak doğrulanıp tekil bakiye olarak tüm oyunculara yayınlanır; eşzamanlı satışlarda para kaybı yaşanmaz.
-- **Ayrı Kayıt Slotu:** Misafir olarak oynarken ilerleme `polyminer_save_coop_v1` slotuna yazılır; ana solo maden kaydın (`polyminer_save_v1`) kesinlikle korunur. Odadan ayrıldığında veya bağlantı koptuğunda kendi madenine temizce dönersin.
+- **Arkadaş Grubu Co-op ve Kasa Senkronizasyonu:** Hızlı tepki veren P2P oyun deneyimi için tasarlanmıştır (anti-cheat sunucusu değil, arkadaş grubu oturumu). Tüm bakiye değişimleri Host'a iletilir, bakiye/borç limitine (`MAX_DEBT_ALLOWED = -$1000`) göre doğrulanır ve tekil bakiye olarak yayınlanır; reddedilen misafir satın almaları `txId` ile yerelde otomatik geri alınır.
+- **Solo Kayıt Koruması:** Misafir olarak oynarken yerel `localStorage` kaydın (`polyminer_save_v1`) kesinlikle ezilmez; dünya ilerlemesi Host'ta tutulur. Odadan ayrıldığında veya bağlantı koptuğunda kendi solo madenine temizce dönersin.
 
 ## Kontroller
 

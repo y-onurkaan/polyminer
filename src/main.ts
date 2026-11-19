@@ -25,7 +25,7 @@ import { UIManager } from './ui';
 import { updateEffects, renderEffects, addFloatingText, getScreenShakeOffset, showBiomeBanner } from './effects';
 import { saveGame, loadGame, applyLoadedGame, resetSave, serializeWorld, applySavedGrid } from './save';
 import { updateBoulders, renderBoulders } from './boulders';
-import { NetworkManager, MIN_SHARED_MONEY, MAX_SHARED_MONEY } from './network';
+import { NetworkManager, MIN_SHARED_MONEY, MAX_SHARED_MONEY, MAX_DEBT_ALLOWED } from './network';
 import { RemotePlayerState, TileType } from './types';
 import { sounds } from './audio';
 import { emitGameEvent, onGameEvent } from './events';
@@ -104,6 +104,10 @@ const network = new NetworkManager({
   getSharedMoney: () => player.money,
   getDiscoveredRelics: () => player.discoveredRelics || [],
   getMuseumRewardClaimed: () => !!player.museumRewardClaimed,
+  canAcceptVictory: () =>
+    world
+      .slice(Math.max(0, GRID_HEIGHT - 12))
+      .every(row => row.every(tile => tile.type !== TileType.ANCIENT_CORE)),
   onWelcomeSync: (data) => {
     wasGuestSession = true;
     if (data.grid && Array.isArray(data.grid) && data.grid.length === GRID_HEIGHT) {
@@ -116,7 +120,9 @@ const network = new NetworkManager({
       player.money = Math.trunc(data.sharedMoney);
     }
     if (Array.isArray(data.discoveredRelics)) {
-      player.discoveredRelics = data.discoveredRelics.filter(id => typeof id === 'string' && id in RELIC_DEFINITIONS);
+      player.discoveredRelics = data.discoveredRelics.filter(
+        id => typeof id === 'string' && Object.hasOwn(RELIC_DEFINITIONS, id)
+      );
     }
     player.museumRewardClaimed = !!data.museumRewardClaimed;
     uiManager.showToast('🗺️ Host Haritası & Ortak Kasa Eşitlendi!', '#10b981');
@@ -175,15 +181,21 @@ const network = new NetworkManager({
     ) {
       player.money = Math.trunc(data.money);
     }
+    let rolledBack = false;
+    if (data.rejected && data.txId) {
+      rolledBack = uiManager.rollbackPendingPurchase(data.txId);
+    } else if (data.txId) {
+      uiManager.confirmPendingPurchase(data.txId);
+    }
     const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
     const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
     uiManager.updateHUD(player, depthMeters, false);
     uiManager.refreshShopIfOpen();
 
     const change = Number(data.changeAmount) || 0;
-    if (change === 0) {
+    if (change === 0 && !rolledBack) {
       uiManager.showToast(`⚠️ Bakiye eşitlendi (${data.reason})`, '#f59e0b');
-    } else if (data.actorName !== network.localName) {
+    } else if (change !== 0 && data.actorName !== network.localName) {
       const isGain = change > 0;
       const msg = isGain
         ? `🤝 [${data.actorName}] +$${change.toLocaleString()} kazandı! (${data.reason})`
@@ -193,7 +205,11 @@ const network = new NetworkManager({
   },
   onSharedRelicUpdate: (data) => {
     if (!player.discoveredRelics) player.discoveredRelics = [];
-    if (typeof data.relicId === 'string' && data.relicId in RELIC_DEFINITIONS && !player.discoveredRelics.includes(data.relicId)) {
+    if (
+      typeof data.relicId === 'string' &&
+      Object.hasOwn(RELIC_DEFINITIONS, data.relicId) &&
+      !player.discoveredRelics.includes(data.relicId)
+    ) {
       player.discoveredRelics.push(data.relicId);
       if (data.actorName !== network.localName) {
         uiManager.showToast(`🏛️ [${data.actorName}] yeni bir kadim fosil keşfetti!`, '#f59e0b');
@@ -246,12 +262,12 @@ const network = new NetworkManager({
 
 /**
  * Safe save wrapper:
- * Solo session: saves to primary 'solo' slot ('polyminer_save_v1').
- * Guest co-op session: saves to dedicated 'coop' slot ('polyminer_save_coop_v1'), preserving solo save 100% pristine!
+ * Solo/Host session: saves to primary 'solo' slot ('polyminer_save_v1').
+ * Guest co-op session: skips local overwrite (Host owns the shared world) so solo save remains 100% pristine!
  */
 function safeSaveGame(): boolean {
   if (wasGuestSession || (network.isConnected && !network.getIsHost())) {
-    return saveGame(player, world, playTime, 'coop');
+    return false;
   }
   return saveGame(player, world, playTime, 'solo');
 }
@@ -259,6 +275,10 @@ function safeSaveGame(): boolean {
 // Pre-save solo game before connecting to any remote host
 onGameEvent('polyminer:pre-join', () => {
   saveGame(player, world, playTime);
+});
+
+onGameEvent('polyminer:host-started', () => {
+  wasGuestSession = false;
 });
 
 uiManager.setPlayerRef(player, () => {
@@ -282,7 +302,7 @@ onGameEvent('polyminer:tile-changed', (d) => {
 
 onGameEvent('polyminer:wallet-changed', (d) => {
   if (typeof d.changeAmount === 'number') {
-    network.sendWalletDelta(d.changeAmount, d.reason || 'Ortak İşlem', !!d.allowDebt);
+    network.sendWalletDelta(d.changeAmount, d.reason || 'Ortak İşlem', !!d.allowDebt, d.txId);
   }
 });
 
@@ -556,6 +576,7 @@ function updateCamera(deltaTime: number) {
 let refuelAccumulator = 0;
 let repairAccumulator = 0;
 let pendingStationSpend = 0;
+let lastDebtWarnTime = 0;
 
 function handleStations(dt: number): boolean {
   let isRefueling = false;
@@ -563,51 +584,67 @@ function handleStations(dt: number): boolean {
   const centerGx = Math.floor((player.x + PLAYER_WIDTH / 2) / TILE_SIZE);
   const bottomGy = Math.floor((player.y + PLAYER_HEIGHT + 2) / TILE_SIZE);
 
-  // 1. FUEL PAD (y === 3, x < 3): Refuels and repairs hull
+  // 1. FUEL PAD (y === 3, x < 3): Refuels and repairs hull up to MAX_DEBT_ALLOWED
   if (bottomGy === SURFACE_ROW && centerGx < 3 && player.isGrounded) {
-    // A. Fuel replenishment ($1.00 per Litre)
-    if (player.fuel < player.maxFuel) {
-      isRefueling = true;
-      const fuelNeeded = player.maxFuel - player.fuel;
-      const refuelRate = 45; // Litres per second
-      const fuelStep = Math.min(fuelNeeded, refuelRate * dt);
-      const costPerLitre = FUEL_COST_PER_LITRE;
-
-      refuelAccumulator += fuelStep * costPerLitre;
-      if (refuelAccumulator >= 1) {
-        const moneyToDeduct = Math.floor(refuelAccumulator);
-        const prevMoney = player.money;
-        player.money -= moneyToDeduct;
-        pendingStationSpend += moneyToDeduct;
-        refuelAccumulator -= moneyToDeduct;
-
-        if (prevMoney >= 0 && player.money < 0) {
-          addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, '💳 KREDİ KULLANILDI (BORÇLANDIN)', '#fb923c');
+    const needsService = player.fuel < player.maxFuel || player.hull < player.maxHull;
+    if (player.money <= MAX_DEBT_ALLOWED) {
+      if (needsService) {
+        const nowMs = performance.now();
+        if (nowMs - lastDebtWarnTime >= 2500) {
+          lastDebtWarnTime = nowMs;
+          addFloatingText(
+            player.x + PLAYER_WIDTH / 2,
+            player.y - 24,
+            `⛔ Kredi limiti ($${MAX_DEBT_ALLOWED}) doldu!`,
+            '#ef4444'
+          );
         }
       }
-      player.fuel = Math.min(player.maxFuel, player.fuel + fuelStep);
-    }
+    } else {
+      // A. Fuel replenishment ($1.00 per Litre)
+      if (player.fuel < player.maxFuel) {
+        isRefueling = true;
+        const fuelNeeded = player.maxFuel - player.fuel;
+        const refuelRate = 45; // Litres per second
+        const fuelStep = Math.min(fuelNeeded, refuelRate * dt);
+        const costPerLitre = FUEL_COST_PER_LITRE;
 
-    // B. Hull repair ($1.20 per HP)
-    if (player.hull < player.maxHull) {
-      isRefueling = true;
-      const costPerHp = 1.20;
-      const repairRate = 35; // HP per second
-      const hpStep = Math.min(player.maxHull - player.hull, repairRate * dt);
+        refuelAccumulator += fuelStep * costPerLitre;
+        if (refuelAccumulator >= 1) {
+          const moneyToDeduct = Math.floor(refuelAccumulator);
+          const prevMoney = player.money;
+          player.money -= moneyToDeduct;
+          pendingStationSpend += moneyToDeduct;
+          refuelAccumulator -= moneyToDeduct;
 
-      repairAccumulator += hpStep * costPerHp;
-      if (repairAccumulator >= 1) {
-        const moneyToDeduct = Math.floor(repairAccumulator);
-        const prevMoney = player.money;
-        player.money -= moneyToDeduct;
-        pendingStationSpend += moneyToDeduct;
-        repairAccumulator -= moneyToDeduct;
-
-        if (prevMoney >= 0 && player.money < 0) {
-          addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, '💳 KREDİ KULLANILDI (BORÇLANDIN)', '#fb923c');
+          if (prevMoney >= 0 && player.money < 0) {
+            addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, '💳 KREDİ KULLANILDI (BORÇLANDIN)', '#fb923c');
+          }
         }
+        player.fuel = Math.min(player.maxFuel, player.fuel + fuelStep);
       }
-      player.hull = Math.min(player.maxHull, player.hull + hpStep);
+
+      // B. Hull repair ($1.20 per HP)
+      if (player.hull < player.maxHull && player.money > MAX_DEBT_ALLOWED) {
+        isRefueling = true;
+        const costPerHp = 1.20;
+        const repairRate = 35; // HP per second
+        const hpStep = Math.min(player.maxHull - player.hull, repairRate * dt);
+
+        repairAccumulator += hpStep * costPerHp;
+        if (repairAccumulator >= 1) {
+          const moneyToDeduct = Math.floor(repairAccumulator);
+          const prevMoney = player.money;
+          player.money -= moneyToDeduct;
+          pendingStationSpend += moneyToDeduct;
+          repairAccumulator -= moneyToDeduct;
+
+          if (prevMoney >= 0 && player.money < 0) {
+            addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, '💳 KREDİ KULLANILDI (BORÇLANDIN)', '#fb923c');
+          }
+        }
+        player.hull = Math.min(player.maxHull, player.hull + hpStep);
+      }
     }
 
     // C. Hararet instant reset
@@ -618,7 +655,6 @@ function handleStations(dt: number): boolean {
   // Batch-sync station expenses to Co-op shared wallet
   if (pendingStationSpend >= 10 || (!isRefueling && pendingStationSpend > 0)) {
     emitGameEvent('polyminer:wallet-changed', {
-      newMoney: player.money,
       changeAmount: -pendingStationSpend,
       reason: 'İstasyon İkmali',
       allowDebt: true
@@ -657,96 +693,104 @@ function handleStations(dt: number): boolean {
 
 // Main Game Loop
 let lastTime = performance.now();
+let lastLoopErrorLog = 0;
 
 function gameLoop(now: number) {
-  const deltaTime = Math.min((now - lastTime) / 1000, 0.05);
-  lastTime = now;
+  try {
+    const deltaTime = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
 
-  // Seamless escape: If shop is open and player presses flight/drive keys, close shop and resume flight
-  if (uiManager.isShopOpen()) {
-    const wantsToMove = !!(
-      keysDown['ArrowUp'] || keysDown['KeyW'] || keysDown['w'] || keysDown['W'] ||
-      keysDown['ArrowLeft'] || keysDown['KeyA'] || keysDown['a'] || keysDown['A']
-    );
-    if (wantsToMove) {
-      uiManager.hideShop();
+    // Seamless escape: If shop is open and player presses flight/drive keys, close shop and resume flight
+    if (uiManager.isShopOpen()) {
+      const wantsToMove = !!(
+        keysDown['ArrowUp'] || keysDown['KeyW'] || keysDown['w'] || keysDown['W'] ||
+        keysDown['ArrowLeft'] || keysDown['KeyA'] || keysDown['a'] || keysDown['A']
+      );
+      if (wantsToMove) {
+        uiManager.hideShop();
+      }
     }
-  }
 
-  const isModalOpen = uiManager.isAnyModalOpen();
+    const isModalOpen = uiManager.isAnyModalOpen();
 
-  // Periodic 5-Second Autosave
-  playTime += deltaTime;
-  autoSaveTimer += deltaTime;
-  if (autoSaveTimer >= 5.0) {
-    autoSaveTimer = 0;
-    safeSaveGame();
-  }
-
-  // 1. Station Mechanics & Tow Check
-  const isRefueling = handleStations(deltaTime);
-
-  // Continuous Elevator Rail Deployment if [C] is held down
-  if (!isModalOpen && (keysDown['KeyC'] || keysDown['c'] || keysDown['C'])) {
-    useConsumableItem(player, 'elevatorRails', world);
-  }
-
-  // 2. Physics, Controls & Visual Effects
-  updatePlayer(player, world, keysDown, deltaTime, isModalOpen);
-  if (!isModalOpen) {
-    updateBoulders(deltaTime, world, player);
-  }
-  updateEffects(deltaTime);
-
-  // 3. Camera Tracking & Biome Transition Banner
-  updateCamera(deltaTime);
-  const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
-  if (centerRow > SURFACE_ROW) {
-    const activeBiome = getBiomeForDepth(centerRow);
-    if (activeBiome.id !== lastSubterraneanBiomeId) {
-      lastSubterraneanBiomeId = activeBiome.id;
-      showBiomeBanner(activeBiome.name, activeBiome.tier, BIOME_ACCENT_COLORS[activeBiome.id] || '#38bdf8');
-      sounds.playBiomeTransition();
+    // Periodic 5-Second Autosave
+    playTime += deltaTime;
+    autoSaveTimer += deltaTime;
+    if (autoSaveTimer >= 5.0) {
+      autoSaveTimer = 0;
+      safeSaveGame();
     }
+
+    // 1. Station Mechanics & Tow Check
+    const isRefueling = handleStations(deltaTime);
+
+    // Continuous Elevator Rail Deployment if [C] is held down
+    if (!isModalOpen && (keysDown['KeyC'] || keysDown['c'] || keysDown['C'])) {
+      useConsumableItem(player, 'elevatorRails', world);
+    }
+
+    // 2. Physics, Controls & Visual Effects
+    updatePlayer(player, world, keysDown, deltaTime, isModalOpen);
+    if (!isModalOpen) {
+      updateBoulders(deltaTime, world, player);
+    }
+    updateEffects(deltaTime);
+
+    // 3. Camera Tracking & Biome Transition Banner
+    updateCamera(deltaTime);
+    const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    if (centerRow > SURFACE_ROW) {
+      const activeBiome = getBiomeForDepth(centerRow);
+      if (activeBiome.id !== lastSubterraneanBiomeId) {
+        lastSubterraneanBiomeId = activeBiome.id;
+        showBiomeBanner(activeBiome.name, activeBiome.tier, BIOME_ACCENT_COLORS[activeBiome.id] || '#38bdf8');
+        sounds.playBiomeTransition();
+      }
+    }
+
+    // Broadcast local player state at 20 Hz
+    network.broadcastPlayerState({
+      x: player.x,
+      y: player.y,
+      vx: player.vx,
+      vy: player.vy,
+      facing: player.facing,
+      isDrilling: player.isDrilling,
+      drillProgress: player.drillProgress,
+      isThrusting: player.isThrusting,
+      drillTier: player.upgrades.drill || 1
+    });
+
+    // 4. Rendering (Camera-Shaken World Layer + Steady HUD Overlays & Mini-Radar)
+    ctx.fillStyle = '#09090b';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const shake = getScreenShakeOffset();
+    ctx.save();
+    if (shake.x !== 0 || shake.y !== 0) {
+      ctx.translate(shake.x, shake.y);
+    }
+    renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player, remotePlayers, false);
+    renderBoulders(ctx, cameraY);
+    renderRemotePlayers(ctx, remotePlayers, cameraY, canvas.height, deltaTime);
+    renderPlayer(ctx, player, cameraY);
+    renderEffects(ctx, cameraY);
+    ctx.restore();
+
+    renderScreenOverlays(ctx, canvas.width, canvas.height, player);
+    renderMiniRadar(ctx, world, player, cameraY, canvas.width, canvas.height, remotePlayers);
+
+    // 5. Update Top HUD
+    const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
+    uiManager.updateHUD(player, depthMeters, isRefueling);
+  } catch (err) {
+    if (now - lastLoopErrorLog >= 2000) {
+      lastLoopErrorLog = now;
+      console.error('[POLYMINER] Frame error:', err);
+    }
+  } finally {
+    requestAnimationFrame(gameLoop);
   }
-
-  // Broadcast local player state at 20 Hz
-  network.broadcastPlayerState({
-    x: player.x,
-    y: player.y,
-    vx: player.vx,
-    vy: player.vy,
-    facing: player.facing,
-    isDrilling: player.isDrilling,
-    drillProgress: player.drillProgress,
-    isThrusting: player.isThrusting,
-    drillTier: player.upgrades.drill || 1
-  });
-
-  // 4. Rendering (Camera-Shaken World Layer + Steady HUD Overlays & Mini-Radar)
-  ctx.fillStyle = '#09090b';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const shake = getScreenShakeOffset();
-  ctx.save();
-  if (shake.x !== 0 || shake.y !== 0) {
-    ctx.translate(shake.x, shake.y);
-  }
-  renderWorld(ctx, world, cameraY, canvas.width, canvas.height, player, remotePlayers, false);
-  renderBoulders(ctx, cameraY);
-  renderRemotePlayers(ctx, remotePlayers, cameraY, canvas.height, deltaTime);
-  renderPlayer(ctx, player, cameraY);
-  renderEffects(ctx, cameraY);
-  ctx.restore();
-
-  renderScreenOverlays(ctx, canvas.width, canvas.height, player);
-  renderMiniRadar(ctx, world, player, cameraY, canvas.width, canvas.height, remotePlayers);
-
-  // 5. Update Top HUD
-  const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
-  uiManager.updateHUD(player, depthMeters, isRefueling);
-
-  requestAnimationFrame(gameLoop);
 }
 
 // Start

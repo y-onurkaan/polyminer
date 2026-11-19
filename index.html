@@ -246,7 +246,7 @@
             </div>
           </div>
           <div class="modal-footer" style="display:flex; justify-content:flex-end;">
-            <button class="btn-close" onclick="document.getElementById('btn-close-help').click()">Anladım, Kapat [ESC]</button>
+            <button id="btn-close-help-footer" class="btn-close">Anladım, Kapat [ESC]</button>
           </div>
         </div>
       </div>
@@ -320,7 +320,7 @@
                 <div id="coop-host-info" style="display:none; background:#022c22; border:1px solid #10b981; border-radius:4px; padding:10px; text-align:center; margin-top:6px;">
                   <div style="font-size:10px; color:#6ee7b7; font-family:monospace;">ODA KODUN (ARKADAŞLARINLA PAYLAŞ):</div>
                   <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-top:4px;">
-                    <span id="coop-display-room-code" style="font-size:20px; font-weight:bold; letter-spacing:2px; color:#34d399; font-family:monospace;">POLY-XXXX</span>
+                    <span id="coop-display-room-code" style="font-size:20px; font-weight:bold; letter-spacing:2px; color:#34d399; font-family:monospace;">POLY-XXXXXX</span>
                     <button id="btn-coop-copy-code" class="btn-icon" style="padding:4px 8px; font-size:11px; background:#065f46; color:#a7f3d0; border:1px solid #10b981; cursor:pointer;" title="Kodu Kopyala">📋 Kopyala</button>
                   </div>
                 </div>
@@ -330,7 +330,7 @@
               <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px; border-top:1px solid #1e293b; padding-top:10px;">
                 <label style="font-size:10.5px; color:#94a3b8; font-family:monospace;">🔗 ODAYA KATIL (CLIENT):</label>
                 <div style="display:flex; gap:6px;">
-                  <input id="coop-join-input" type="text" placeholder="Örn: 4821 veya POLY-4821" maxlength="12" style="flex:1; background:#0f172a; border:1px solid #334155; color:#f8fafc; padding:6px 8px; border-radius:4px; font-family:monospace; font-size:12px; text-transform:uppercase; outline:none;" />
+                  <input id="coop-join-input" type="text" placeholder="Örn: A7K9M2 veya POLY-A7K9M2" maxlength="12" style="flex:1; background:#0f172a; border:1px solid #334155; color:#f8fafc; padding:6px 8px; border-radius:4px; font-family:monospace; font-size:12px; text-transform:uppercase; outline:none;" />
                   <button id="btn-coop-join-room" class="btn-primary" style="background:#2563eb; border:1px solid #3b82f6; margin:0; padding:6px 12px; font-size:11px; white-space:nowrap; width:auto;">
                     Bağlan
                   </button>

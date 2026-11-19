@@ -2,11 +2,12 @@ import { TileType } from './types';
 
 export interface GameEventMap {
   'polyminer:tile-changed': { gx: number; gy: number; tileType: TileType; hasElevator?: boolean };
-  'polyminer:wallet-changed': { newMoney: number; changeAmount: number; reason: string; allowDebt?: boolean };
+  'polyminer:wallet-changed': { changeAmount: number; reason: string; allowDebt?: boolean; txId?: string };
   'polyminer:relic-discovered': { relicId: string };
   'polyminer:museum-claim': undefined;
   'polyminer:victory': { winnerName: string };
   'polyminer:pre-join': undefined;
+  'polyminer:host-started': undefined;
 }
 
 type VoidGameEvent = {
