@@ -11,6 +11,32 @@ export function resetBoulders(): void {
   activeBoulders.length = 0;
 }
 
+function emitBoulderTileChange(gx: number, gy: number, tileType: TileType): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('polyminer:tile-changed', {
+      detail: { gx, gy, tileType }
+    }));
+  }
+}
+
+function settleBoulderAt(
+  world: Tile[][],
+  b: FallingBoulder,
+  settleRow: number
+): void {
+  if (settleRow >= 0 && settleRow < world.length && world[settleRow]?.[b.gx]) {
+    world[settleRow][b.gx] = {
+      type: TileType.ROCK,
+      hardness: ROCK_HARDNESS,
+      revealed: true,
+      ...(b.relicId ? { relicId: b.relicId } : {})
+    };
+    sounds.playImpactSound(70);
+    addShockwave(b.x + TILE_SIZE / 2, settleRow * TILE_SIZE + TILE_SIZE / 2, 28);
+    emitBoulderTileChange(b.gx, settleRow, TileType.ROCK);
+  }
+}
+
 /**
  * Checks if a cleared block at (gx, gy) leaves a rock above it without support.
  * If so, the rock enters unstable tremble state and falls!
@@ -29,12 +55,15 @@ export function checkAndTriggerFallingRock(world: Tile[][], gx: number, gy: numb
   // Verify not already active
   if (activeBoulders.some(b => b.gx === gx && b.gy === aboveGy)) return;
 
+  const relicId = tileAbove.relicId;
+
   // Turn the static rock tile into EMPTY so it moves as an active physical boulder
   world[aboveGy][gx] = {
     type: TileType.EMPTY,
     hardness: 0,
     revealed: tileAbove.revealed ?? true
   };
+  emitBoulderTileChange(gx, aboveGy, TileType.EMPTY);
 
   activeBoulders.push({
     id: nextBoulderId++,
@@ -44,7 +73,9 @@ export function checkAndTriggerFallingRock(world: Tile[][], gx: number, gy: numb
     y: aboveGy * TILE_SIZE,
     vy: 0,
     state: 'tremble',
-    trembleTimer: 0.45 // 450ms tremble warning before dropping
+    trembleTimer: 0.45, // 450ms tremble warning before dropping
+    hasHitPlayer: false,
+    ...(relicId ? { relicId } : {})
   });
 
   sounds.playImpactSound(25);
@@ -66,6 +97,8 @@ export function updateBoulders(
       if (b.trembleTimer <= 0) {
         b.state = 'falling';
         b.vy = 60; // Initial downward drop speed
+        // Trigger chain-fall for any rock stacked directly above the cell this boulder just vacated
+        checkAndTriggerFallingRock(world, b.gx, b.gy);
       }
       continue;
     }
@@ -74,7 +107,7 @@ export function updateBoulders(
     b.vy += GRAVITY * 1.35 * dt;
     b.y += b.vy * dt;
 
-    // 2. Collision with Player
+    // 2. Single-Hit Collision with Player
     const pLeft = player.x + 2;
     const pRight = player.x + PLAYER_WIDTH - 2;
     const pTop = player.y + 2;
@@ -85,7 +118,8 @@ export function updateBoulders(
     const bTop = b.y + 4;
     const bBottom = b.y + TILE_SIZE - 4;
 
-    if (bLeft < pRight && bRight > pLeft && bTop < pBottom && bBottom > pTop) {
+    if (!b.hasHitPlayer && bLeft < pRight && bRight > pLeft && bTop < pBottom && bBottom > pTop) {
+      b.hasHitPlayer = true;
       // Crush impact on Player (mitigated by hull upgrade and obsidian tablet relic)
       let armorFactor = getDamageReductionFactor(player.upgrades.hull);
       if (player.discoveredRelics?.includes('obsidian_tablet')) {
@@ -99,25 +133,23 @@ export function updateBoulders(
       addShockwave(b.x + TILE_SIZE / 2, b.y + TILE_SIZE / 2, 45);
     }
 
-    // 3. Collision with Ground / Tile beneath (including steel elevator ceiling protection)
+    // 3. Collision with World Bottom or Ground / Tile beneath (including steel elevator ceiling protection)
     const currentBottomRow = Math.floor((b.y + TILE_SIZE - 2) / TILE_SIZE);
-    const belowTile = world[currentBottomRow]?.[b.gx];
+    if (currentBottomRow >= world.length) {
+      const bottomRow = world.length - 1;
+      const bottomTile = world[bottomRow]?.[b.gx];
+      if (bottomTile && bottomTile.type === TileType.EMPTY && !bottomTile.hasElevator) {
+        settleBoulderAt(world, b, bottomRow);
+      }
+      activeBoulders.splice(i, 1);
+      continue;
+    }
 
+    const belowTile = world[currentBottomRow]?.[b.gx];
     if (belowTile && (belowTile.type !== TileType.EMPTY || belowTile.hasElevator)) {
       // Land and settle on top of this solid block or reinforced elevator shaft
       const settleRow = Math.max(4, currentBottomRow - 1);
-      if (settleRow >= 0 && settleRow < world.length) {
-        world[settleRow][b.gx] = {
-          type: TileType.ROCK,
-          hardness: ROCK_HARDNESS,
-          revealed: true
-        };
-        sounds.playImpactSound(70);
-        addShockwave(b.x + TILE_SIZE / 2, settleRow * TILE_SIZE + TILE_SIZE / 2, 28);
-
-        // Chain Reaction: check if another rock was resting above this settled rock!
-        checkAndTriggerFallingRock(world, b.gx, settleRow);
-      }
+      settleBoulderAt(world, b, settleRow);
       activeBoulders.splice(i, 1);
     }
   }

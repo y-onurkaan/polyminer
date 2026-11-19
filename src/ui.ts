@@ -1,9 +1,21 @@
-import { PlayerExtendedState } from './player';
+import { PlayerExtendedState, buyConsumableItem } from './player';
 import { OreDefinition, ConsumableInventory, CHASSIS_COLORS } from './types';
 import { NetworkManager, RosterPlayer, sanitizeColor, sanitizeName } from './network';
-import { CONSUMABLES, ORES, BIOMES, RELIC_DEFINITIONS, MUSEUM_CURATOR_REWARD } from './constants';
+import {
+  CONSUMABLES,
+  ORES,
+  BIOMES,
+  RELIC_DEFINITIONS,
+  MUSEUM_CURATOR_REWARD,
+  UPGRADES,
+  UpgradeConfig,
+  UpgradeKey,
+  OreRequirement
+} from './constants';
 import { sounds } from './audio';
 import { addFloatingText } from './effects';
+
+export { UPGRADES, type UpgradeConfig, type OreRequirement };
 
 export function escapeHtml(str: string): string {
   if (typeof str !== 'string') return '';
@@ -14,110 +26,6 @@ export function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-
-export interface OreRequirement {
-  [oreId: string]: number;
-}
-
-export interface UpgradeConfig {
-  name: string;
-  desc: string;
-  icon: string;
-  levels: {
-    level: number;
-    value: number;
-    label: string;
-    cost: number;
-    oreReqs?: OreRequirement;
-  }[];
-}
-
-export const UPGRADES: Record<string, UpgradeConfig> = {
-  drill: {
-    name: 'Matkap Hızı',
-    desc: 'Toprak ve madenleri daha hızlı parçalar',
-    icon: '⚡',
-    levels: [
-      { level: 1, value: 1.25, label: '1.25x (Standart)', cost: 0 },
-      { level: 2, value: 1.85, label: '1.85x (+%48)', cost: 150, oreReqs: { iron: 2 } },
-      { level: 3, value: 2.60, label: '2.60x (+%108)', cost: 550, oreReqs: { silver: 3 } },
-      { level: 4, value: 3.75, label: '3.75x (Kaya Kırıcı)', cost: 1600, oreReqs: { gold: 3 } },
-      { level: 5, value: 5.50, label: '5.50x (Ultra Matkap)', cost: 4200, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  },
-  fuelTank: {
-    name: 'Yakıt Tankı',
-    desc: 'Daha derin maden seferleri için kapasite',
-    icon: '🛢️',
-    levels: [
-      { level: 1, value: 100, label: '100 Litre', cost: 0 },
-      { level: 2, value: 160, label: '160 Litre', cost: 120, oreReqs: { iron: 2 } },
-      { level: 3, value: 240, label: '240 Litre', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 360, label: '360 Litre', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 520, label: '520 Litre', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  },
-  cargo: {
-    name: 'Kargo Kapasitesi',
-    desc: 'Tek seferde daha fazla maden taşıma haznesi',
-    icon: '🎒',
-    levels: [
-      { level: 1, value: 10, label: '10 Adet', cost: 0 },
-      { level: 2, value: 16, label: '16 Adet', cost: 100, oreReqs: { iron: 2 } },
-      { level: 3, value: 25, label: '25 Adet', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 40, label: '40 Adet', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 65, label: '65 Adet', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  },
-  engine: {
-    name: 'Motor İtki Gücü',
-    desc: 'Yukarı tırmanış hızını ve kaçış gücünü artırır',
-    icon: '🚀',
-    levels: [
-      { level: 1, value: 1500, label: '1500 kW', cost: 0 },
-      { level: 2, value: 1850, label: '1850 kW', cost: 130, oreReqs: { iron: 2 } },
-      { level: 3, value: 2300, label: '2300 kW', cost: 520, oreReqs: { silver: 3 } },
-      { level: 4, value: 2850, label: '2850 kW', cost: 1550, oreReqs: { gold: 3 } },
-      { level: 5, value: 3600, label: '3600 kW', cost: 4000, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  },
-  radar: {
-    name: 'Yeraltı Radarı',
-    desc: 'Sis altındaki madenleri daha uzaktan tespit eder',
-    icon: '📡',
-    levels: [
-      { level: 1, value: 2.5, label: '2.5 Blok (Temel)', cost: 0 },
-      { level: 2, value: 3.5, label: '3.5 Blok (+%40)', cost: 140, oreReqs: { iron: 2 } },
-      { level: 3, value: 4.5, label: '4.5 Blok (+%80)', cost: 520, oreReqs: { silver: 3 } },
-      { level: 4, value: 5.8, label: '5.8 Blok (+%132)', cost: 1550, oreReqs: { gold: 3 } },
-      { level: 5, value: 7.5, label: '7.5 Blok (Derin Tarama)', cost: 3900, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  },
-  hull: {
-    name: 'Gövde Zırhı',
-    desc: 'Maksimum dayanıklılık ve darbe hasarı direnci',
-    icon: '🛡️',
-    levels: [
-      { level: 1, value: 100, label: '100 HP (Standart)', cost: 0 },
-      { level: 2, value: 150, label: '150 HP (-%10 Hasar)', cost: 120, oreReqs: { iron: 2 } },
-      { level: 3, value: 220, label: '220 HP (-%20 Hasar)', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 320, label: '320 HP (-%30 Hasar)', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 450, label: '450 HP (-%40 Hasar)', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  },
-  radiator: {
-    name: 'Termal Radyatör',
-    desc: 'Hararet soğuma hızını artırır ve aşırı ısınmayı önler',
-    icon: '❄️',
-    levels: [
-      { level: 1, value: 20, label: '20%/s (Standart Fan)', cost: 0 },
-      { level: 2, value: 28, label: '28%/s (Sıvı Soğutma - %10 Direnç)', cost: 180, oreReqs: { iron: 2 } },
-      { level: 3, value: 38, label: '38%/s (Termoelektrik - %20 Direnç)', cost: 600, oreReqs: { silver: 3 } },
-      { level: 4, value: 50, label: '50%/s (Kriyojenik - %30 Direnç)', cost: 1750, oreReqs: { gold: 3 } },
-      { level: 5, value: 65, label: '65%/s (Plazma Emici - %40 Direnç)', cost: 4200, oreReqs: { emerald: 3, diamond: 1 } }
-    ]
-  }
-};
 
 export class UIManager {
   // HUD Elements
@@ -509,7 +417,7 @@ export class UIManager {
       this.stationStatus.innerHTML = `<span style="color:#22d3ee; font-weight:bold; letter-spacing:0.5px;">⚡ ${dirText} · [Durdur: Boşluk / Ters Yön]</span>`;
     } else if (player.isInElevator) {
       this.stationStatus.style.display = 'block';
-      this.stationStatus.innerHTML = '<span style="color:#06b6d4; font-size:12px;">🔩 Asansör Şaftı · <b>2x [W]</b>: Otomatik Yukarı | <b>2x [S]</b>: Otomatik Aşağı</span>';
+      this.stationStatus.innerHTML = '<span style="color:#06b6d4; font-size:10.5px;">🔩 Asansör Şaftı · <b>2x [W]</b>: Otomatik Yukarı | <b>2x [S]</b>: Otomatik Aşağı</span>';
     } else if (isRefueling) {
       this.stationStatus.style.display = 'block';
       if (player.money < 0) {
@@ -555,7 +463,30 @@ export class UIManager {
   }
 
   public canAutoOpenShop(): boolean {
-    return !this.isShopVisible && !this.shopDismissedUntilLeave && !this.isHelpVisible && !this.isTowVisible;
+    return (
+      !this.isShopVisible &&
+      !this.shopDismissedUntilLeave &&
+      !this.isHelpVisible &&
+      !this.isTowVisible &&
+      !this.isCoopVisible &&
+      !this.isVictoryVisible
+    );
+  }
+
+  public isAnyModalOpen(): boolean {
+    return (
+      this.isShopVisible ||
+      this.isTowVisible ||
+      this.isHelpVisible ||
+      this.isVictoryVisible ||
+      this.isCoopVisible
+    );
+  }
+
+  public refreshShopIfOpen(): void {
+    if (this.isShopVisible) {
+      this.renderShopContent();
+    }
   }
 
   public onLeaveShopPad(): void {
@@ -703,7 +634,8 @@ export class UIManager {
 
   private buyUpgrade(key: string) {
     if (!this.playerRef) return;
-    const config = UPGRADES[key];
+    const config = UPGRADES[key as UpgradeKey];
+    if (!config) return;
     const currentTier = (this.playerRef.upgrades as any)[key] || 1;
     const nextTierConfig = config.levels.find(l => l.level === currentTier + 1);
 
@@ -784,18 +716,15 @@ export class UIManager {
   private buyConsumable(itemKey: keyof ConsumableInventory, count: number = 1) {
     if (!this.playerRef) return;
     const item = CONSUMABLES[itemKey];
-    const totalCost = Math.round(item.cost * count * 100) / 100;
-    if (this.playerRef.money < totalCost) return;
+    const result = buyConsumableItem(this.playerRef, itemKey, count);
+    if (!result.ok) return;
 
-    this.playerRef.money = Math.round((this.playerRef.money - totalCost) * 100) / 100;
-    const addedAmount = (item.amount || 1) * count;
-    this.playerRef.inventory[itemKey] = (this.playerRef.inventory[itemKey] || 0) + addedAmount;
     sounds.playSellSound();
-    addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+${addedAmount} ${item.name}`, '#4ade80');
+    addFloatingText(this.playerRef.x + 19, this.playerRef.y - 14, `+${result.addedAmount} ${item.name}`, '#4ade80');
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-        detail: { newMoney: this.playerRef.money, changeAmount: -totalCost, reason: `${item.name} x${count}` }
+        detail: { newMoney: this.playerRef.money, changeAmount: -result.totalCost, reason: `${item.name} x${count}` }
       }));
     }
 
@@ -962,7 +891,7 @@ export class UIManager {
             <button class="btn-upgrade ${canAfford ? 'can-buy' : ''}" data-consumable="${key}" data-count="1" ${canAfford ? '' : 'disabled'} style="flex:1; text-align:center; padding:5px 4px;">
               1 Adet: $${item.cost}
             </button>
-            <button class="btn-upgrade ${canAfford10 ? 'can-buy' : ''}" data-consumable="${key}" data-count="10" ${canAfford10 ? '' : 'disabled'} style="flex:1; text-align:center; padding:5px 4px; background:#0f766e; border-color:#14b8a6;">
+            <button class="btn-upgrade btn-upgrade-pack ${canAfford10 ? 'can-buy' : ''}" data-consumable="${key}" data-count="10" ${canAfford10 ? '' : 'disabled'} style="flex:1; text-align:center; padding:5px 4px;">
               10 Adet: $${item.cost * 10}
             </button>
           </div>
@@ -1061,13 +990,13 @@ export class UIManager {
         if (!player.museumRewardClaimed) {
           museumHtml += `
             <button id="btn-claim-museum" class="btn-primary" style="background:#f59e0b; border:1px solid #fbbf24; margin-top:6px; font-weight:bold; font-size:11px; padding:6px 10px;">
-              🏆 Küratör Büyük Ödülünü Al (+$15,000)
+              🏆 Küratör Büyük Ödülünü Al (+$${MUSEUM_CURATOR_REWARD.toLocaleString()})
             </button>
           `;
         } else {
           museumHtml += `
             <div style="text-align:center; padding:5px; background:#064e3b; border:1px solid #059669; border-radius:4px; margin-top:6px; font-size:10px; font-weight:bold; color:#6ee7b7;">
-              ✅ Küratör Büyük Ödülü Alındı (+$15,000)
+              ✅ Küratör Büyük Ödülü Alındı (+$${MUSEUM_CURATOR_REWARD.toLocaleString()})
             </div>
           `;
         }
@@ -1078,17 +1007,10 @@ export class UIManager {
       const btnClaim = this.museumContainer.querySelector('#btn-claim-museum');
       if (btnClaim) {
         btnClaim.addEventListener('click', () => {
-          player.money += MUSEUM_CURATOR_REWARD;
-          player.museumRewardClaimed = true;
-          sounds.playVictoryFanfare();
-          addFloatingText(player.x + 19, player.y - 14, '🏆 +$15,000 MÜZE ÖDÜLÜ!', '#f59e0b');
-
+          if (player.museumRewardClaimed) return;
           if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
-              detail: { newMoney: player.money, changeAmount: MUSEUM_CURATOR_REWARD, reason: 'Müze Küratör Ödülü' }
-            }));
+            window.dispatchEvent(new CustomEvent('polyminer:museum-claim'));
           }
-
           if (this.onStateChange) this.onStateChange();
           this.renderShopContent();
         });
@@ -1242,6 +1164,9 @@ export class UIManager {
       }
     } else if (victoryTitle) {
       victoryTitle.innerText = `TEBRİKLER! YERALTI ÇEKİRDEĞİ FETHEDİLDİ`;
+      if (victoryDesc) {
+        victoryDesc.innerHTML = `550. metrenin en dibindeki devasa <strong style="color:#ec4899;">Kadim Dodecagon (12-Gen) Çekirdeği</strong>'ni başarıyla parçalayıp çıkardın!<br/>Yeraltının tüm jeolojik gizemleri çözüldü ve operasyon mutlak zaferle sonuçlandı.`;
+      }
     }
 
     if (this.victoryModal) {
@@ -1437,8 +1362,11 @@ export class UIManager {
     if (this.networkManager.isConnected) {
       if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'block';
       if (this.networkManager.getIsHost() && this.coopHostInfo && this.networkManager.getRoomCode()) {
+        const code = this.networkManager.getRoomCode()!;
         this.coopHostInfo.style.display = 'block';
-        if (this.coopDisplayRoomCode) this.coopDisplayRoomCode.innerText = `POLY-${this.networkManager.getRoomCode()}`;
+        if (this.coopDisplayRoomCode) {
+          this.coopDisplayRoomCode.innerText = code.startsWith('POLY-') ? code : `POLY-${code}`;
+        }
       }
     } else {
       if (this.coopDisconnectContainer) this.coopDisconnectContainer.style.display = 'none';
@@ -1458,13 +1386,13 @@ export class UIManager {
       if (isConnected && this.networkManager?.getRoomCode()) {
         const code = this.networkManager.getRoomCode()!;
         const displayCode = code.startsWith('POLY-') ? code : `POLY-${code}`;
-        this.btnOpenCoop.textContent = `🟢 ODA: ${displayCode} (${peerCount} Kişi)`;
+        this.btnOpenCoop.textContent = `🟢 ${displayCode} (${peerCount})`;
         this.btnOpenCoop.style.borderColor = '#10b981';
         this.btnOpenCoop.style.color = '#34d399';
         this.btnOpenCoop.style.background = 'rgba(16, 185, 129, 0.22)';
         this.btnOpenCoop.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.4)';
       } else {
-        this.btnOpenCoop.textContent = '🌐 CO-OP (Tek Kişi)';
+        this.btnOpenCoop.textContent = '🌐 CO-OP';
         this.btnOpenCoop.style.borderColor = '#06b6d4';
         this.btnOpenCoop.style.color = '#22d3ee';
         this.btnOpenCoop.style.background = 'rgba(6, 182, 212, 0.18)';

@@ -26,8 +26,36 @@ export function createEmptyWorld(): Tile[][] {
   return world;
 }
 
+export function computeTileHardness(type: TileType, y: number, ore?: OreDefinition): number {
+  switch (type) {
+    case TileType.EMPTY:
+      return 0;
+    case TileType.FUEL_PAD:
+    case TileType.SHOP_PAD:
+      return Infinity;
+    case TileType.ROCK:
+      return ROCK_HARDNESS;
+    case TileType.GAS_POCKET:
+      return 1.2;
+    case TileType.MAGMA_ROCK:
+      return y >= GRID_HEIGHT - 6 ? 4.5 : 2.8;
+    case TileType.CHEST:
+      return 1.5;
+    case TileType.ANCIENT_CORE:
+      return ORE_DEFINITIONS.ANCIENT_CORE.hardness;
+    case TileType.ORE:
+      return (ore?.hardness ?? 1.0) + getBiomeForDepth(y).extraHardness * 0.3;
+    case TileType.DIRT:
+    default: {
+      if (y <= SURFACE_ROW) return 1.0;
+      const depthProgress = (y - SURFACE_ROW) / (GRID_HEIGHT - SURFACE_ROW);
+      return 1.0 + depthProgress * 0.4 + getBiomeForDepth(y).extraHardness;
+    }
+  }
+}
+
 function selectOreForDepth(depth: number): OreDefinition | undefined {
-  const eligibleOres = ORES.filter(ore => ore.minDepth <= depth);
+  const eligibleOres = ORES.filter(ore => ore.id !== 'ancient_core' && ore.minDepth <= depth);
   if (eligibleOres.length === 0) return undefined;
 
   const weighted = eligibleOres.map(ore => {
@@ -75,14 +103,13 @@ export function generateWorld(): Tile[][] {
 
   for (let y = 0; y < GRID_HEIGHT; y++) {
     const row: Tile[] = [];
-    const biome = getBiomeForDepth(y);
 
     for (let x = 0; x < GRID_WIDTH; x++) {
       // 1. Rows 0, 1, 2 are sky (EMPTY & always revealed)
       if (y < SURFACE_ROW) {
         row.push({
           type: TileType.EMPTY,
-          hardness: 0,
+          hardness: computeTileHardness(TileType.EMPTY, y),
           revealed: true
         });
         continue;
@@ -93,19 +120,19 @@ export function generateWorld(): Tile[][] {
         if (x < 3) {
           row.push({
             type: TileType.FUEL_PAD,
-            hardness: Infinity,
+            hardness: computeTileHardness(TileType.FUEL_PAD, y),
             revealed: true
           });
         } else if (x >= GRID_WIDTH - 3) {
           row.push({
             type: TileType.SHOP_PAD,
-            hardness: Infinity,
+            hardness: computeTileHardness(TileType.SHOP_PAD, y),
             revealed: true
           });
         } else {
           row.push({
             type: TileType.DIRT,
-            hardness: 1.0,
+            hardness: computeTileHardness(TileType.DIRT, y),
             revealed: true
           });
         }
@@ -114,7 +141,6 @@ export function generateWorld(): Tile[][] {
 
       // 3. Subterranean rows (y > 3): Fog of war starts here (revealed = false)
       const depthProgress = (y - SURFACE_ROW) / (GRID_HEIGHT - SURFACE_ROW);
-      const baseDirtHardness = 1.0 + depthProgress * 0.4 + biome.extraHardness;
       const rockChance = 0.06 + depthProgress * 0.08;
       const oreChance = 0.095 + depthProgress * 0.045;
       const roll = Math.random();
@@ -132,7 +158,7 @@ export function generateWorld(): Tile[][] {
         // Rock block (drillable with Drill Level >= 4, can fall when excavated below!)
         row.push({
           type: TileType.ROCK,
-          hardness: ROCK_HARDNESS,
+          hardness: computeTileHardness(TileType.ROCK, y),
           revealed: false
         });
       } else if (roll < rockChance + oreChance) {
@@ -141,13 +167,13 @@ export function generateWorld(): Tile[][] {
           row.push({
             type: TileType.ORE,
             ore,
-            hardness: ore.hardness + biome.extraHardness * 0.3,
+            hardness: computeTileHardness(TileType.ORE, y, ore),
             revealed: false
           });
         } else {
           row.push({
             type: TileType.DIRT,
-            hardness: baseDirtHardness,
+            hardness: computeTileHardness(TileType.DIRT, y),
             revealed: false
           });
         }
@@ -155,21 +181,21 @@ export function generateWorld(): Tile[][] {
         // Magma Rock Hazard
         row.push({
           type: TileType.MAGMA_ROCK,
-          hardness: 2.8,
+          hardness: computeTileHardness(TileType.MAGMA_ROCK, y),
           revealed: false
         });
       } else if (Math.random() < gasPocketChance) {
         // Gas Pocket Hazard
         row.push({
           type: TileType.GAS_POCKET,
-          hardness: 1.2,
+          hardness: computeTileHardness(TileType.GAS_POCKET, y),
           revealed: false
         });
       } else {
         // Standard Biome Dirt
         row.push({
           type: TileType.DIRT,
-          hardness: baseDirtHardness,
+          hardness: computeTileHardness(TileType.DIRT, y),
           revealed: false
         });
       }
@@ -203,14 +229,14 @@ export function generateWorld(): Tile[][] {
             if (!chestPlaced && Math.random() < 0.35 && dy === caveHeight - 1) {
               world[gy][gx] = {
                 type: TileType.CHEST,
-                hardness: 1.5,
+                hardness: computeTileHardness(TileType.CHEST, gy),
                 revealed: false
               };
               chestPlaced = true;
             } else {
               world[gy][gx] = {
                 type: TileType.EMPTY,
-                hardness: 0,
+                hardness: computeTileHardness(TileType.EMPTY, gy),
                 revealed: false
               };
             }
@@ -230,7 +256,7 @@ export function generateWorld(): Tile[][] {
       if (gx >= 0 && gx < GRID_WIDTH && gy < GRID_HEIGHT) {
         world[gy][gx] = {
           type: TileType.EMPTY,
-          hardness: 0,
+          hardness: computeTileHardness(TileType.EMPTY, gy),
           revealed: false
         };
       }
@@ -239,22 +265,22 @@ export function generateWorld(): Tile[][] {
 
   // Magma guardian pillars framing the sacred chamber
   for (let gx = chamberCenterGx - 3; gx <= chamberCenterGx + 3; gx++) {
-    world[chamberCenterGy - 2][gx] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
-    world[chamberCenterGy + 2][gx] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
+    world[chamberCenterGy - 2][gx] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy - 2), revealed: false };
+    world[chamberCenterGy + 2][gx] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy + 2), revealed: false };
   }
-  world[chamberCenterGy - 1][chamberCenterGx - 3] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
-  world[chamberCenterGy][chamberCenterGx - 3] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
-  world[chamberCenterGy + 1][chamberCenterGx - 3] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
+  world[chamberCenterGy - 1][chamberCenterGx - 3] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy - 1), revealed: false };
+  world[chamberCenterGy][chamberCenterGx - 3] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy), revealed: false };
+  world[chamberCenterGy + 1][chamberCenterGx - 3] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy + 1), revealed: false };
 
-  world[chamberCenterGy - 1][chamberCenterGx + 3] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
-  world[chamberCenterGy][chamberCenterGx + 3] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
-  world[chamberCenterGy + 1][chamberCenterGx + 3] = { type: TileType.MAGMA_ROCK, hardness: 4.5, revealed: false };
+  world[chamberCenterGy - 1][chamberCenterGx + 3] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy - 1), revealed: false };
+  world[chamberCenterGy][chamberCenterGx + 3] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy), revealed: false };
+  world[chamberCenterGy + 1][chamberCenterGx + 3] = { type: TileType.MAGMA_ROCK, hardness: computeTileHardness(TileType.MAGMA_ROCK, chamberCenterGy + 1), revealed: false };
 
   // Sacred Center Altar: The Ancient Dodecagon Core
   world[chamberCenterGy][chamberCenterGx] = {
     type: TileType.ANCIENT_CORE,
     ore: ORE_DEFINITIONS.ANCIENT_CORE,
-    hardness: 15.0,
+    hardness: computeTileHardness(TileType.ANCIENT_CORE, chamberCenterGy, ORE_DEFINITIONS.ANCIENT_CORE),
     revealed: false
   };
 

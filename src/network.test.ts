@@ -94,6 +94,8 @@ describe('P2P Sanitization & Validation Helpers', () => {
 
     it('rejects zero, non-finite, out of bounds, or non-numeric values', () => {
       expect(isValidWalletDelta(0)).toBe(false);
+      expect(isValidWalletDelta(0.5)).toBe(false);
+      expect(isValidWalletDelta(-0.5)).toBe(false);
       expect(isValidWalletDelta(NaN)).toBe(false);
       expect(isValidWalletDelta(Infinity)).toBe(false);
       expect(isValidWalletDelta(-Infinity)).toBe(false);
@@ -203,6 +205,22 @@ describe('P2P Sanitization & Validation Helpers', () => {
       expect(migrateSaveData(null)).toBeNull();
       expect(migrateSaveData('not a save')).toBeNull();
       expect(migrateSaveData({ version: 1 })).toBeNull(); // missing player/grid
+    });
+
+    it('preserves reasonable negative debt and clamps extreme negative balances', () => {
+      const debtSave = migrateSaveData({
+        version: 1,
+        player: { x: 0, y: 0, money: -250 },
+        grid: []
+      });
+      expect(debtSave?.player.money).toBe(-250);
+
+      const extremeDebtSave = migrateSaveData({
+        version: 1,
+        player: { x: 0, y: 0, money: -500_000 },
+        grid: []
+      });
+      expect(extremeDebtSave?.player.money).toBe(-100_000);
     });
   });
 });

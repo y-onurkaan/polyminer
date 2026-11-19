@@ -952,13 +952,14 @@ function renderMiniRadar(
   ctx.font = 'bold 8px monospace';
   ctx.fillStyle = '#38bdf8';
   ctx.textAlign = 'center';
-  ctx.fillText('RADAR 550m', radarX + radarW / 2, radarY + 11);
+  ctx.textBaseline = 'top';
+  ctx.fillText('RADAR 550m', radarX + radarW / 2, radarY + 5);
 
   // Map canvas inside card
   const mapX = radarX + 3;
-  const mapY = radarY + 15;
+  const mapY = radarY + 18;
   const scaleX = 2; // 24 cols * 2 = 48px
-  const scaleY = (radarH - 22) / GRID_HEIGHT; // dynamically fits 280 rows
+  const scaleY = (radarH - 23) / GRID_HEIGHT; // dynamically fits 280 rows
 
   // Surface sky line
   ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';

@@ -3,6 +3,10 @@ import { RemotePlayerState, TileType } from './types';
 import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, RELIC_DEFINITIONS, ORE_DEFINITIONS } from './constants';
 import { SavedTile } from './save';
 
+export const MIN_SHARED_MONEY = -100_000;
+export const MAX_DEBT_ALLOWED = -1000;
+export const MAX_SHARED_MONEY = 1e9;
+
 export interface RosterPlayer {
   id: string;
   name: string;
@@ -15,12 +19,19 @@ export interface NetworkCallbacks {
   getGridSyncData?: () => any[][];
   getSharedMoney?: () => number;
   getDiscoveredRelics?: () => string[];
-  onWelcomeSync?: (data: { grid: any[][]; sharedMoney: number; discoveredRelics: string[] }) => void;
+  getMuseumRewardClaimed?: () => boolean;
+  onWelcomeSync?: (data: {
+    grid: any[][];
+    sharedMoney: number;
+    discoveredRelics: string[];
+    museumRewardClaimed?: boolean;
+  }) => void;
   onRemotePlayerUpdate?: (player: RemotePlayerState) => void;
   onRemotePlayerLeave?: (id: string) => void;
   onTileUpdate?: (data: { gx: number; gy: number; tileType: TileType; hasElevator?: boolean; sourcePlayerName?: string }) => void;
   onSharedWalletUpdate?: (data: { money: number; changeAmount: number; reason: string; actorName: string }) => void;
   onSharedRelicUpdate?: (data: { relicId: string; actorName: string }) => void;
+  onMuseumRewardClaimed?: (data: { actorName: string; grantLocally: boolean }) => void;
   onVictory?: (data: { winnerName: string }) => void;
   onStatusChange?: (statusText: string, isConnected: boolean, peerCount: number) => void;
   onRosterUpdate?: (roster: RosterPlayer[]) => void;
@@ -42,7 +53,7 @@ export const isFiniteNum = (v: unknown): v is number => typeof v === 'number' &&
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 export const isInt = (v: unknown): v is number => Number.isInteger(v);
 export const isValidWalletDelta = (delta: unknown): delta is number =>
-  isFiniteNum(delta) && Math.abs(delta) <= 1e7 && Math.floor(delta) !== 0;
+  isFiniteNum(delta) && Math.abs(delta) <= 1e7 && Math.trunc(delta) !== 0;
 
 export const VALID_TILE_TYPES: Set<number> = new Set([
   TileType.EMPTY,
@@ -124,6 +135,7 @@ export class NetworkManager {
   public isConnected: boolean = false;
   private lastStateBroadcast: number = 0;
   private victoryDeclared: boolean = false;
+  private museumRewardClaimed: boolean = false;
 
   public getLocalId(): string | null {
     return this.peer?.id ?? null;
@@ -187,7 +199,7 @@ export class NetworkManager {
       this.peer = new Peer(peerId, { debug: 1 });
 
       this.peer.on('open', (id) => {
-        this.roomCode = code;
+        this.roomCode = peerId;
         this.isConnected = true;
         this.roster.clear();
         this.roster.set(id, {
@@ -305,6 +317,7 @@ export class NetworkManager {
     this.roomCode = null;
     this.isHost = false;
     this.victoryDeclared = false;
+    this.museumRewardClaimed = false;
     this.connections.clear();
     this.hostConn = null;
     this.roster.clear();
@@ -337,7 +350,8 @@ export class NetworkManager {
         payload: {
           grid: this.callbacks.getGridSyncData?.(),
           sharedMoney: this.callbacks.getSharedMoney?.() ?? 0,
-          discoveredRelics: this.callbacks.getDiscoveredRelics?.() ?? []
+          discoveredRelics: this.callbacks.getDiscoveredRelics?.() ?? [],
+          museumRewardClaimed: !!(this.museumRewardClaimed || this.callbacks.getMuseumRewardClaimed?.())
         }
       });
 
@@ -350,6 +364,7 @@ export class NetworkManager {
     });
 
     conn.on('close', () => {
+      if (!this.connections.has(conn.peer)) return;
       this.connections.delete(conn.peer);
       this.roster.delete(conn.peer);
       this.callbacks.onRemotePlayerLeave?.(conn.peer);
@@ -414,16 +429,21 @@ export class NetworkManager {
 
       case 'WELCOME_SYNC': {
         if (!this.isHost && packet.payload && typeof packet.payload === 'object') {
-          const { grid, sharedMoney, discoveredRelics } = packet.payload;
+          const { grid, sharedMoney, discoveredRelics, museumRewardClaimed } = packet.payload;
           const safeGrid = isValidSavedGrid(grid) ? grid : undefined;
-          const safeMoney = isFiniteNum(sharedMoney) && sharedMoney >= 0 && sharedMoney < 1e9 ? Math.floor(sharedMoney) : 0;
+          const safeMoney =
+            isFiniteNum(sharedMoney) && sharedMoney >= MIN_SHARED_MONEY && sharedMoney <= MAX_SHARED_MONEY
+              ? Math.trunc(sharedMoney)
+              : 0;
           const safeRelics = Array.isArray(discoveredRelics)
             ? discoveredRelics.filter((id: unknown) => typeof id === 'string' && id in RELIC_DEFINITIONS)
             : [];
+          this.museumRewardClaimed = !!museumRewardClaimed;
           this.callbacks.onWelcomeSync?.({
             grid: safeGrid as any,
             sharedMoney: safeMoney,
-            discoveredRelics: safeRelics
+            discoveredRelics: safeRelics,
+            museumRewardClaimed: this.museumRewardClaimed
           });
         }
         break;
@@ -446,7 +466,7 @@ export class NetworkManager {
         const safeY = clamp(p.y, 0, GRID_HEIGHT * TILE_SIZE);
         const safeVx = isFiniteNum(p.vx) ? clamp(p.vx, -2000, 2000) : 0;
         const safeVy = isFiniteNum(p.vy) ? clamp(p.vy, -2000, 2000) : 0;
-        const safeFacing = (p.facing === 'left' || p.facing === 'right' || p.facing === 'down') ? p.facing : 'down';
+        const safeFacing = (p.facing === 'left' || p.facing === 'right' || p.facing === 'down' || p.facing === 'up') ? p.facing : 'down';
         const safeDrillProgress = isFiniteNum(p.drillProgress) ? clamp(p.drillProgress, 0, 1) : 0;
         const safeDrillTier = isFiniteNum(p.drillTier) ? clamp(Math.floor(p.drillTier), 1, 10) : 1;
 
@@ -512,19 +532,39 @@ export class NetworkManager {
         const p = packet.payload;
         if (!p || typeof p !== 'object') break;
         if (!isValidWalletDelta(p.changeAmount)) break;
-        const changeAmount = Math.floor(p.changeAmount);
+        const changeAmount = Math.trunc(p.changeAmount);
+        const allowDebt = !!p.allowDebt;
 
         const currentMoney = this.callbacks.getSharedMoney?.() ?? 0;
         const newMoney = currentMoney + changeAmount;
-        // Spending is rejected if balance would go below 0
-        if (newMoney < 0 || newMoney > 1e9) break;
+        const minAllowed = changeAmount > 0
+          ? MIN_SHARED_MONEY
+          : (allowDebt && changeAmount >= -500 ? MAX_DEBT_ALLOWED : 0);
+
+        // Spending is rejected if balance would breach limit; push authoritative balance back to requester
+        if (newMoney < minAllowed || newMoney > MAX_SHARED_MONEY) {
+          try {
+            if (sourceConn.open) {
+              sourceConn.send({
+                type: 'SHARED_WALLET_UPDATE',
+                payload: {
+                  money: Math.trunc(currentMoney),
+                  changeAmount: 0,
+                  reason: 'Yetersiz Bakiye (Reddedildi)',
+                  actorName: 'Sistem'
+                }
+              });
+            }
+          } catch (_) {}
+          break;
+        }
 
         const rosterEntry = this.roster.get(sourceConn.peer);
         const safeActorName = rosterEntry?.name || 'Madenci';
         const safeReason = typeof p.reason === 'string' ? p.reason.slice(0, 40) : 'Ortak İşlem';
 
         const validatedWallet = {
-          money: Math.floor(newMoney),
+          money: Math.trunc(newMoney),
           changeAmount,
           reason: safeReason,
           actorName: safeActorName
@@ -546,20 +586,44 @@ export class NetworkManager {
         if (this.isHost) break;
         const p = packet.payload;
         if (!p || typeof p !== 'object') break;
-        if (!isFiniteNum(p.money) || p.money < 0 || p.money > 1e9) break;
+        if (!isFiniteNum(p.money) || p.money < MIN_SHARED_MONEY || p.money > MAX_SHARED_MONEY) break;
         if (!isFiniteNum(p.changeAmount) || Math.abs(p.changeAmount) > 1e8) break;
 
         const safeActorName = sanitizeName(p.actorName, 'Madenci');
         const safeReason = typeof p.reason === 'string' ? p.reason.slice(0, 40) : 'Ortak İşlem';
 
         const validatedWallet = {
-          money: Math.floor(p.money),
-          changeAmount: Math.floor(p.changeAmount),
+          money: Math.trunc(p.money),
+          changeAmount: Math.trunc(p.changeAmount),
           reason: safeReason,
           actorName: safeActorName
         };
 
         this.callbacks.onSharedWalletUpdate?.(validatedWallet);
+        break;
+      }
+
+      case 'MUSEUM_REWARD_CLAIM_REQUEST': {
+        if (!this.isHost) break;
+        if (this.museumRewardClaimed || this.callbacks.getMuseumRewardClaimed?.()) break;
+        this.museumRewardClaimed = true;
+
+        const rosterEntry = this.roster.get(sourceConn.peer);
+        const safeActorName = rosterEntry?.name || 'Madenci';
+        this.callbacks.onMuseumRewardClaimed?.({ actorName: safeActorName, grantLocally: true });
+        this.broadcast({
+          type: 'MUSEUM_REWARD_CLAIMED',
+          payload: { actorName: safeActorName }
+        });
+        break;
+      }
+
+      case 'MUSEUM_REWARD_CLAIMED': {
+        if (this.isHost) break;
+        if (this.museumRewardClaimed) break;
+        this.museumRewardClaimed = true;
+        const safeActorName = sanitizeName(packet.payload?.actorName, 'Madenci');
+        this.callbacks.onMuseumRewardClaimed?.({ actorName: safeActorName, grantLocally: false });
         break;
       }
 
@@ -724,18 +788,20 @@ export class NetworkManager {
    * Host authoritatively aggregates deltas and broadcasts the new total.
    * Guest sends delta request to Host for authoritative validation.
    */
-  public sendWalletDelta(changeAmount: number, reason: string) {
+  public sendWalletDelta(changeAmount: number, reason: string, allowDebt: boolean = false) {
     if (!this.isConnected) return;
     if (!isValidWalletDelta(changeAmount)) return;
 
+    const delta = Math.trunc(changeAmount);
+    const safeReason = typeof reason === 'string' ? reason.slice(0, 40) : 'Ortak İşlem';
+
     if (this.isHost) {
       const currentMoney = this.callbacks.getSharedMoney?.() ?? 0;
-      const safeReason = typeof reason === 'string' ? reason.slice(0, 40) : 'Ortak İşlem';
       this.broadcast({
         type: 'SHARED_WALLET_UPDATE',
         payload: {
-          money: Math.floor(currentMoney),
-          changeAmount: Math.floor(changeAmount),
+          money: Math.trunc(currentMoney),
+          changeAmount: delta,
           reason: safeReason,
           actorName: this.localName
         }
@@ -744,11 +810,35 @@ export class NetworkManager {
       this.broadcast({
         type: 'WALLET_DELTA_REQUEST',
         payload: {
-          changeAmount: Math.floor(changeAmount),
-          reason: typeof reason === 'string' ? reason.slice(0, 40) : 'Ortak İşlem'
+          changeAmount: delta,
+          reason: safeReason,
+          allowDebt
         }
       });
     }
+  }
+
+  /**
+   * Requests or grants the single-per-room Museum Curator Reward.
+   */
+  public requestMuseumRewardClaim(): 'solo' | 'granted' | 'requested' | 'already_claimed' {
+    if (!this.isConnected) return 'solo';
+    if (this.museumRewardClaimed || this.callbacks.getMuseumRewardClaimed?.()) {
+      return 'already_claimed';
+    }
+    if (this.isHost) {
+      this.museumRewardClaimed = true;
+      this.broadcast({
+        type: 'MUSEUM_REWARD_CLAIMED',
+        payload: { actorName: this.localName }
+      });
+      return 'granted';
+    }
+    this.broadcast({
+      type: 'MUSEUM_REWARD_CLAIM_REQUEST',
+      payload: {}
+    });
+    return 'requested';
   }
 
   /**

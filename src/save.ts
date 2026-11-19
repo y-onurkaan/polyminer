@@ -1,6 +1,7 @@
 import { PlayerExtendedState } from './player';
 import { Tile, TileType } from './types';
-import { ORE_DEFINITIONS } from './constants';
+import { ORE_DEFINITIONS, getUpgradeLevelValue } from './constants';
+import { computeTileHardness } from './world';
 
 export const SAVE_KEY = 'polyminer_save_v1';
 export const SAVE_KEY_COOP = 'polyminer_save_coop_v1';
@@ -120,6 +121,16 @@ export function saveGame(
   }
 }
 
+function normalizeUpgradeTier(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 1;
+  return Math.max(1, Math.min(5, Math.floor(raw)));
+}
+
+function normalizeNonNegInt(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.floor(raw));
+}
+
 /**
  * Migrates older or unversioned save files to the latest schema version.
  */
@@ -132,35 +143,72 @@ export function migrateSaveData(raw: unknown): SaveData | null {
   }
 
   const p = d.player;
+  const rawUpgrades = p.upgrades && typeof p.upgrades === 'object' ? p.upgrades : {};
+  const upgrades: PlayerExtendedState['upgrades'] = {
+    drill: normalizeUpgradeTier(rawUpgrades.drill),
+    fuelTank: normalizeUpgradeTier(rawUpgrades.fuelTank),
+    cargo: normalizeUpgradeTier(rawUpgrades.cargo),
+    engine: normalizeUpgradeTier(rawUpgrades.engine),
+    radar: normalizeUpgradeTier(rawUpgrades.radar),
+    hull: normalizeUpgradeTier(rawUpgrades.hull),
+    radiator: normalizeUpgradeTier(rawUpgrades.radiator)
+  };
+
+  const rawInv = p.inventory && typeof p.inventory === 'object' ? p.inventory : {};
+  const inventory: PlayerExtendedState['inventory'] = {
+    fuelCanister: normalizeNonNegInt(rawInv.fuelCanister),
+    repairKit: normalizeNonNegInt(rawInv.repairKit),
+    teleporter: normalizeNonNegInt(rawInv.teleporter),
+    dynamite: normalizeNonNegInt(rawInv.dynamite),
+    elevatorRails: normalizeNonNegInt(rawInv.elevatorRails)
+  };
+
+  const maxFuel = (typeof p.maxFuel === 'number' && Number.isFinite(p.maxFuel) && p.maxFuel > 0)
+    ? p.maxFuel
+    : getUpgradeLevelValue('fuelTank', upgrades.fuelTank);
+  const maxHull = (typeof p.maxHull === 'number' && Number.isFinite(p.maxHull) && p.maxHull > 0)
+    ? p.maxHull
+    : getUpgradeLevelValue('hull', upgrades.hull);
+  const maxCargo = (typeof p.maxCargo === 'number' && Number.isFinite(p.maxCargo) && p.maxCargo > 0)
+    ? p.maxCargo
+    : getUpgradeLevelValue('cargo', upgrades.cargo);
+  const drillSpeed = (typeof p.drillSpeed === 'number' && Number.isFinite(p.drillSpeed) && p.drillSpeed > 0)
+    ? p.drillSpeed
+    : getUpgradeLevelValue('drill', upgrades.drill);
+  const thrusterPower = (typeof p.thrusterPower === 'number' && Number.isFinite(p.thrusterPower) && p.thrusterPower > 0)
+    ? p.thrusterPower
+    : getUpgradeLevelValue('engine', upgrades.engine);
+  const radarRadius = (typeof p.radarRadius === 'number' && Number.isFinite(p.radarRadius) && p.radarRadius > 0)
+    ? p.radarRadius
+    : getUpgradeLevelValue('radar', upgrades.radar);
+
   const migratedPlayer: SaveData['player'] = {
-    x: typeof p.x === 'number' ? p.x : 0,
-    y: typeof p.y === 'number' ? p.y : 0,
-    fuel: typeof p.fuel === 'number' ? p.fuel : 100,
-    maxFuel: typeof p.maxFuel === 'number' ? p.maxFuel : 100,
-    hull: typeof p.hull === 'number' ? p.hull : 100,
-    maxHull: typeof p.maxHull === 'number' ? p.maxHull : 100,
+    x: typeof p.x === 'number' && Number.isFinite(p.x) ? p.x : 0,
+    y: typeof p.y === 'number' && Number.isFinite(p.y) ? p.y : 0,
+    fuel: typeof p.fuel === 'number' && Number.isFinite(p.fuel) ? Math.max(0, Math.min(maxFuel, p.fuel)) : maxFuel,
+    maxFuel,
+    hull: typeof p.hull === 'number' && Number.isFinite(p.hull) ? Math.max(0, Math.min(maxHull, p.hull)) : maxHull,
+    maxHull,
     cargo: Array.isArray(p.cargo) ? p.cargo.filter((c: any) => typeof c === 'string') : [],
-    maxCargo: typeof p.maxCargo === 'number' ? p.maxCargo : 10,
-    money: typeof p.money === 'number' && Number.isFinite(p.money) ? Math.max(0, Math.floor(p.money)) : 0,
-    drillSpeed: typeof p.drillSpeed === 'number' ? p.drillSpeed : 1.25,
-    thrusterPower: typeof p.thrusterPower === 'number' ? p.thrusterPower : 1500,
-    radarRadius: typeof p.radarRadius === 'number' ? p.radarRadius : 2.5,
-    upgrades: p.upgrades && typeof p.upgrades === 'object' ? p.upgrades : {
-      drill: 1, fuelTank: 1, cargo: 1, engine: 1, radar: 1, hull: 1, radiator: 1
-    },
-    inventory: p.inventory && typeof p.inventory === 'object' ? p.inventory : {
-      fuelCanister: 0, repairKit: 0, teleporter: 0, dynamite: 0, elevatorRails: 0
-    },
-    temperature: typeof p.temperature === 'number' ? p.temperature : 24,
-    heat: typeof p.heat === 'number' ? Math.round(p.heat) : 0,
+    maxCargo,
+    money: typeof p.money === 'number' && Number.isFinite(p.money)
+      ? Math.max(-100_000, Math.min(1e9, Math.trunc(p.money)))
+      : 0,
+    drillSpeed,
+    thrusterPower,
+    radarRadius,
+    upgrades,
+    inventory,
+    temperature: typeof p.temperature === 'number' && Number.isFinite(p.temperature) ? p.temperature : 24,
+    heat: typeof p.heat === 'number' && Number.isFinite(p.heat) ? Math.max(0, Math.min(100, Math.round(p.heat))) : 0,
     discoveredRelics: Array.isArray(p.discoveredRelics) ? p.discoveredRelics.filter((r: any) => typeof r === 'string') : [],
     museumRewardClaimed: !!p.museumRewardClaimed
   };
 
   return {
     version: CURRENT_SAVE_VERSION,
-    timestamp: typeof d.timestamp === 'number' ? d.timestamp : Date.now(),
-    playTime: typeof d.playTime === 'number' ? d.playTime : 0,
+    timestamp: typeof d.timestamp === 'number' && Number.isFinite(d.timestamp) ? d.timestamp : Date.now(),
+    playTime: typeof d.playTime === 'number' && Number.isFinite(d.playTime) && d.playTime >= 0 ? d.playTime : 0,
     hasWon: !!d.hasWon,
     player: migratedPlayer,
     grid: d.grid
@@ -200,50 +248,39 @@ export function applyLoadedGame(
   player.y = saveData.player.y;
   player.lastValidX = player.x;
   player.lastValidY = player.y;
-  player.fuel = saveData.player.fuel;
-  player.maxFuel = saveData.player.maxFuel;
-  player.hull = saveData.player.hull;
-  player.maxHull = saveData.player.maxHull;
   player.money = saveData.player.money;
-  player.drillSpeed = saveData.player.drillSpeed;
-  player.thrusterPower = saveData.player.thrusterPower;
-  player.radarRadius = saveData.player.radarRadius;
   player.upgrades = {
-    drill: saveData.player.upgrades?.drill ?? 1,
-    fuelTank: saveData.player.upgrades?.fuelTank ?? 1,
-    cargo: saveData.player.upgrades?.cargo ?? 1,
-    engine: saveData.player.upgrades?.engine ?? 1,
-    radar: saveData.player.upgrades?.radar ?? 1,
-    hull: (saveData.player.upgrades as any)?.hull ?? 1,
-    radiator: (saveData.player.upgrades as any)?.radiator ?? 1
+    drill: normalizeUpgradeTier(saveData.player.upgrades?.drill),
+    fuelTank: normalizeUpgradeTier(saveData.player.upgrades?.fuelTank),
+    cargo: normalizeUpgradeTier(saveData.player.upgrades?.cargo),
+    engine: normalizeUpgradeTier(saveData.player.upgrades?.engine),
+    radar: normalizeUpgradeTier(saveData.player.upgrades?.radar),
+    hull: normalizeUpgradeTier(saveData.player.upgrades?.hull),
+    radiator: normalizeUpgradeTier(saveData.player.upgrades?.radiator)
   };
 
-  // Re-sync all derived upgrade capacities and stats with full fallback
-  const CARGO_CAPACITIES: Record<number, number> = { 1: 10, 2: 16, 3: 25, 4: 40, 5: 65 };
-  const FUEL_CAPACITIES: Record<number, number> = { 1: 100, 2: 160, 3: 240, 4: 360, 5: 520 };
-  const HULL_CAPACITIES: Record<number, number> = { 1: 100, 2: 150, 3: 220, 4: 320, 5: 450 };
-  const DRILL_SPEEDS: Record<number, number> = { 1: 1.25, 2: 1.85, 3: 2.60, 4: 3.75, 5: 5.50 };
-  const THRUSTER_POWERS: Record<number, number> = { 1: 1500, 2: 1850, 3: 2300, 4: 2850, 5: 3600 };
-  const RADAR_RADII: Record<number, number> = { 1: 2.5, 2: 3.5, 3: 4.5, 4: 5.8, 5: 7.5 };
+  // Re-sync all derived upgrade capacities and stats from canonical UPGRADES table
+  player.maxCargo = getUpgradeLevelValue('cargo', player.upgrades.cargo);
+  player.maxFuel = getUpgradeLevelValue('fuelTank', player.upgrades.fuelTank);
+  player.maxHull = getUpgradeLevelValue('hull', player.upgrades.hull);
+  player.drillSpeed = getUpgradeLevelValue('drill', player.upgrades.drill);
+  player.thrusterPower = getUpgradeLevelValue('engine', player.upgrades.engine);
+  player.radarRadius = getUpgradeLevelValue('radar', player.upgrades.radar);
 
-  player.maxCargo = saveData.player.maxCargo ?? CARGO_CAPACITIES[player.upgrades.cargo] ?? 10;
-  player.maxFuel = saveData.player.maxFuel ?? FUEL_CAPACITIES[player.upgrades.fuelTank] ?? 100;
-  player.maxHull = saveData.player.maxHull ?? HULL_CAPACITIES[player.upgrades.hull] ?? 100;
-  player.drillSpeed = saveData.player.drillSpeed ?? DRILL_SPEEDS[player.upgrades.drill] ?? 1.25;
-  player.thrusterPower = saveData.player.thrusterPower ?? THRUSTER_POWERS[player.upgrades.engine] ?? 1500;
-  player.radarRadius = saveData.player.radarRadius ?? RADAR_RADII[player.upgrades.radar] ?? 2.5;
+  player.fuel = Math.max(0, Math.min(player.maxFuel, saveData.player.fuel));
+  player.hull = Math.max(0, Math.min(player.maxHull, saveData.player.hull));
 
-  player.temperature = (saveData.player as any)?.temperature ?? 24;
-  player.heat = (saveData.player as any)?.heat ?? 0;
+  player.temperature = saveData.player.temperature ?? 24;
+  player.heat = Math.max(0, Math.min(100, saveData.player.heat ?? 0));
   player.maxHeat = 100;
   player.heatLockoutTimer = 0;
   player.isStruggling = false;
   player.inventory = {
-    fuelCanister: saveData.player.inventory?.fuelCanister ?? 0,
-    repairKit: saveData.player.inventory?.repairKit ?? 0,
-    teleporter: saveData.player.inventory?.teleporter ?? 0,
-    dynamite: saveData.player.inventory?.dynamite ?? 0,
-    elevatorRails: saveData.player.inventory?.elevatorRails ?? 0
+    fuelCanister: normalizeNonNegInt(saveData.player.inventory?.fuelCanister),
+    repairKit: normalizeNonNegInt(saveData.player.inventory?.repairKit),
+    teleporter: normalizeNonNegInt(saveData.player.inventory?.teleporter),
+    dynamite: normalizeNonNegInt(saveData.player.inventory?.dynamite),
+    elevatorRails: normalizeNonNegInt(saveData.player.inventory?.elevatorRails)
   };
   player.hasWon = !!saveData.hasWon;
   player.discoveredRelics = Array.isArray(saveData.player.discoveredRelics) ? [...saveData.player.discoveredRelics] : [];
@@ -258,8 +295,14 @@ export function applyLoadedGame(
     }
   }
 
-  // 2. Restore Grid State
-  applySavedGrid(saveData.grid, world);
+  // 2. Restore Grid State only if dimensions match live world
+  if (
+    Array.isArray(saveData.grid) &&
+    saveData.grid.length === world.length &&
+    saveData.grid.every((row, y) => Array.isArray(row) && row.length === world[y].length)
+  ) {
+    applySavedGrid(saveData.grid, world);
+  }
 }
 
 /**
@@ -290,6 +333,8 @@ export function applySavedGrid(savedGrid: SavedTile[][], world: Tile[][]): void 
       } else {
         delete targetTile.ore;
       }
+
+      targetTile.hardness = computeTileHardness(targetTile.type, y, targetTile.ore);
     }
   }
 }

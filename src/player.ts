@@ -480,12 +480,51 @@ export function getBlockTier(tile: Tile, gy: number): number {
 }
 
 export function canDrillBlock(tile: Tile | null | undefined, drillLevel: number, gy?: number): boolean {
-  if (!tile || tile.type === TileType.EMPTY) return false;
+  if (
+    !tile ||
+    tile.type === TileType.EMPTY ||
+    tile.type === TileType.FUEL_PAD ||
+    tile.type === TileType.SHOP_PAD ||
+    !Number.isFinite(tile.hardness)
+  ) {
+    return false;
+  }
   if (gy === undefined) return true;
   const blockTier = getBlockTier(tile, gy);
   // Condition C: drillLevel < blockTier - 1 is locked.
   // Drill can mine if drillLevel >= blockTier - 1 (Condition B struggle or Condition A normal/bonus).
   return drillLevel >= (blockTier - 1);
+}
+
+/**
+ * Triggers engine overheat lockout (2.5s), rolls back any active drill, and applies armor-scaled hull damage.
+ */
+export function triggerOverheatLockout(player: PlayerExtendedState): void {
+  if (player.isDrilling) {
+    player.x = player.startDrillX;
+    player.y = player.startDrillY;
+  }
+  player.heat = 100;
+  player.heatLockoutTimer = 2.5;
+  const tabletMult = player.discoveredRelics?.includes('obsidian_tablet') ? 0.75 : 1.0;
+  const damage = Math.max(1, Math.round(15 * getDamageReductionFactor(player.upgrades.hull) * tabletMult));
+  player.hull = Math.max(0, player.hull - damage);
+  sounds.playSteamSizzle();
+  sounds.playImpactSound(damage);
+  addFloatingText(
+    player.x + PLAYER_WIDTH / 2,
+    player.y - 18,
+    `🔥 MOTOR HARARET YAPTI! -${damage} CAN`,
+    '#ef4444'
+  );
+  addShockwave(player.x + PLAYER_WIDTH / 2, player.y + PLAYER_HEIGHT / 2, 40, '#ef4444');
+  player.isDrilling = false;
+  player.isStruggling = false;
+  player.drillProgress = 0;
+  player.drillTarget = null;
+  player.isThrusting = false;
+  sounds.stopDrill();
+  sounds.stopThrust();
 }
 
 export function updatePlayer(
@@ -521,17 +560,23 @@ export function updatePlayer(
 
   if (disableInput) {
     player.vx = 0;
+    player.vy = 0;
     if (player.isThrusting) {
       player.isThrusting = false;
       sounds.stopThrust();
     }
     if (player.isDrilling) {
+      player.x = player.startDrillX;
+      player.y = player.startDrillY;
       player.isDrilling = false;
+      player.isStruggling = false;
+      player.drillProgress = 0;
+      player.drillTarget = null;
       sounds.stopDrill();
     }
-    if (!player.isGrounded) {
-      player.vy = Math.min(MAX_FALL_SPEED, player.vy + GRAVITY * dt);
-      player.y += player.vy * dt;
+    if (player.elevatorAuto) {
+      player.elevatorAuto = null;
+      sounds.stopElevatorHum();
     }
     return;
   }
@@ -604,6 +649,11 @@ export function updatePlayer(
     const coreShardAbsorption = player.discoveredRelics?.includes('core_shard') ? 0.80 : 1.0;
     const drillHeatRate = 14.0 * ambientHeatFactor * struggleHeatMult * radiatorSpecs.heatAbsorptionMult * coreShardAbsorption;
     player.heat = Math.min(100, player.heat + drillHeatRate * dt);
+
+    if (player.heat >= 100) {
+      triggerOverheatLockout(player);
+      return;
+    }
 
     // Zorlanarak kazıda anlık görsel ve metinsel geri bildirim
     if (isStruggling && Math.random() < 0.04) {
@@ -680,6 +730,14 @@ export function updatePlayer(
       // 6. ANCIENT CHEST / SUPPLY VAULT
       else if (targetTile!.type === TileType.CHEST) {
         openChest(player, world, gx, gy);
+        player.x = targetCenterPxX;
+        player.y = targetCenterPxY;
+        player.lastValidX = targetCenterPxX;
+        player.lastValidY = targetCenterPxY;
+        player.isDrilling = false;
+        player.drillProgress = 0;
+        player.drillTarget = null;
+        return;
       }
 
       // Check for Rare Archaeological Relic discovery!
@@ -768,21 +826,7 @@ export function updatePlayer(
 
   // 100% Overheat Lockout Trigger
   if (player.heat >= 100 && player.heatLockoutTimer <= 0) {
-    player.heat = 100;
-    player.heatLockoutTimer = 2.5; // 2.5 seconds lockout
-    const tabletMult = player.discoveredRelics?.includes('obsidian_tablet') ? 0.75 : 1.0;
-    const damage = Math.max(1, Math.round(15 * getDamageReductionFactor(player.upgrades.hull) * tabletMult));
-    player.hull = Math.max(0, player.hull - damage);
-    sounds.playSteamSizzle();
-    sounds.playImpactSound(damage);
-    addFloatingText(player.x + w / 2, player.y - 18, '🔥 MOTOR HARARET YAPTI! -15 CAN', '#ef4444');
-    addShockwave(player.x + w / 2, player.y + h / 2, 40, '#ef4444');
-    player.isDrilling = false;
-    player.isStruggling = false;
-    player.drillTarget = null;
-    player.isThrusting = false;
-    sounds.stopDrill();
-    sounds.stopThrust();
+    triggerOverheatLockout(player);
   }
 
   // --- ELEVATOR LOGIC (AUTO-GLIDE & MANUAL) ---
@@ -1091,7 +1135,15 @@ export function updatePlayer(
 
     // Helper for biome & drill tier gating
     const checkDrillTierGate = (tile: Tile | null | undefined, targetGy: number): boolean => {
-      if (!tile || tile.type === TileType.EMPTY) return false;
+      if (
+        !tile ||
+        tile.type === TileType.EMPTY ||
+        tile.type === TileType.FUEL_PAD ||
+        tile.type === TileType.SHOP_PAD ||
+        !Number.isFinite(tile.hardness)
+      ) {
+        return false;
+      }
       const blockTier = getBlockTier(tile, targetGy);
       const drillTier = player.upgrades.drill || 1;
 
@@ -1190,12 +1242,7 @@ export function updatePlayer(
 
 let lastRockWarnTime = 0;
 
-/**
- * Resets player to surface upon fuel starvation or hull destruction.
- */
-export function towPlayerToSurface(player: PlayerExtendedState, cause: 'fuel' | 'hull' | 'stuck' = 'fuel'): void {
-  console.log(`[POLYMINER] Emergency tow triggered: ${cause}`);
-  player.cargo = [];
+function resetVehicleAtSurface(player: PlayerExtendedState): void {
   player.x = 1.5 * TILE_SIZE - PLAYER_WIDTH / 2;
   player.y = (SURFACE_ROW - 1) * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
   player.lastValidX = player.x;
@@ -1204,14 +1251,31 @@ export function towPlayerToSurface(player: PlayerExtendedState, cause: 'fuel' | 
   player.startDrillY = player.y;
   player.vx = 0;
   player.vy = 0;
-  player.fuel = Math.max(player.fuel, Math.round(player.maxFuel * 0.3));
-  player.hull = Math.max(player.hull, Math.round(player.maxHull * 0.5));
   player.isDrilling = false;
+  player.isStruggling = false;
   player.drillTarget = null;
   player.drillProgress = 0;
+  player.isThrusting = false;
   player.isGrounded = true;
+  player.elevatorAuto = null;
+  player.elevatorCol = undefined;
+  player.isInElevator = false;
+  player.heat = 0;
+  player.heatLockoutTimer = 0;
   sounds.stopThrust();
   sounds.stopDrill();
+  sounds.stopElevatorHum();
+}
+
+/**
+ * Resets player to surface upon fuel starvation or hull destruction.
+ */
+export function towPlayerToSurface(player: PlayerExtendedState, cause: 'fuel' | 'hull' | 'stuck' = 'fuel'): void {
+  console.log(`[POLYMINER] Emergency tow triggered: ${cause}`);
+  player.cargo = [];
+  resetVehicleAtSurface(player);
+  player.fuel = Math.max(player.fuel, Math.round(player.maxFuel * 0.3));
+  player.hull = Math.max(player.hull, Math.round(player.maxHull * 0.5));
   sounds.playAlarm();
 }
 
@@ -1219,20 +1283,7 @@ export function towPlayerToSurface(player: PlayerExtendedState, cause: 'fuel' | 
  * Safe teleport to surface using consumable item Q (retains all cargo!).
  */
 export function teleportPlayerToSurfaceSafe(player: PlayerExtendedState): void {
-  player.x = 1.5 * TILE_SIZE - PLAYER_WIDTH / 2;
-  player.y = (SURFACE_ROW - 1) * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
-  player.lastValidX = player.x;
-  player.lastValidY = player.y;
-  player.startDrillX = player.x;
-  player.startDrillY = player.y;
-  player.vx = 0;
-  player.vy = 0;
-  player.isDrilling = false;
-  player.drillTarget = null;
-  player.drillProgress = 0;
-  player.isGrounded = true;
-  sounds.stopThrust();
-  sounds.stopDrill();
+  resetVehicleAtSurface(player);
   sounds.playTeleport();
 }
 
@@ -1246,6 +1297,17 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
   if (player.y <= (SURFACE_ROW + 0.5) * TILE_SIZE) {
     addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, 'Yüzeyde Patlatılamaz!', '#facc15');
     return false;
+  }
+
+  // Safely abort active drill if triggered mid-drill
+  if (player.isDrilling) {
+    player.x = player.startDrillX;
+    player.y = player.startDrillY;
+    player.isDrilling = false;
+    player.isStruggling = false;
+    player.drillProgress = 0;
+    player.drillTarget = null;
+    sounds.stopDrill();
   }
 
   player.inventory.dynamite--;
@@ -1277,7 +1339,7 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
       const tile = world[gy]?.[gx];
       if (!tile) continue;
 
-      if (tile.type === TileType.FUEL_PAD || tile.type === TileType.SHOP_PAD) {
+      if (tile.type === TileType.EMPTY || tile.type === TileType.FUEL_PAD || tile.type === TileType.SHOP_PAD) {
         continue;
       }
 
@@ -1356,6 +1418,31 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
 }
 
 /**
+ * Purchases consumable units and adds exact unit count (not effect magnitude) to inventory.
+ */
+export function buyConsumableItem(
+  player: PlayerExtendedState,
+  itemKey: keyof ConsumableInventory,
+  count: number = 1
+): { ok: boolean; addedAmount: number; totalCost: number } {
+  if (!Number.isInteger(count) || count <= 0) {
+    return { ok: false, addedAmount: 0, totalCost: 0 };
+  }
+  const item = CONSUMABLES[itemKey];
+  if (!item) {
+    return { ok: false, addedAmount: 0, totalCost: 0 };
+  }
+  const totalCost = Math.round(item.cost * count * 100) / 100;
+  if (player.money < totalCost) {
+    return { ok: false, addedAmount: 0, totalCost };
+  }
+
+  player.money = Math.round((player.money - totalCost) * 100) / 100;
+  player.inventory[itemKey] = (player.inventory[itemKey] || 0) + count;
+  return { ok: true, addedAmount: count, totalCost };
+}
+
+/**
  * Consumes a usable item from player inventory.
  */
 export function useConsumableItem(
@@ -1374,13 +1461,27 @@ export function useConsumableItem(
       addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, '+50L YAKIT', '#38bdf8');
       return true;
 
-    case 'repairKit':
-      if (player.hull >= player.maxHull) return false;
-      player.hull = Math.min(player.maxHull, player.hull + CONSUMABLES.repairKit.amount);
+    case 'repairKit': {
+      const needsHull = player.hull < player.maxHull;
+      const needsCooling = (player.heat ?? 0) > 0 || (player.heatLockoutTimer ?? 0) > 0;
+      if (!needsHull && !needsCooling) return false;
+
+      if (needsHull) {
+        player.hull = Math.min(player.maxHull, player.hull + CONSUMABLES.repairKit.amount);
+      }
+      player.heat = 0;
+      player.heatLockoutTimer = 0;
       player.inventory.repairKit--;
       sounds.playItemUse();
-      addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, '+50 GÖVDE', '#4ade80');
+
+      const label = needsHull && needsCooling
+        ? '+50 GÖVDE & ❄️ SOĞUTULDU'
+        : needsHull
+          ? '+50 GÖVDE'
+          : '❄️ HARARET SIFIRLANDI';
+      addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 14, label, '#4ade80');
       return true;
+    }
 
     case 'teleporter':
       player.inventory.teleporter--;

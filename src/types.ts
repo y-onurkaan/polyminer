@@ -20,6 +20,8 @@ export interface FallingBoulder {
   vy: number;
   state: 'tremble' | 'falling';
   trembleTimer: number;
+  hasHitPlayer?: boolean;
+  relicId?: string;
 }
 
 export interface OreDefinition {

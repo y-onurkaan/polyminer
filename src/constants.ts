@@ -270,3 +270,116 @@ export const RELIC_DEFINITIONS: Record<string, RelicDefinition> = {
 export const RELICS: RelicDefinition[] = Object.values(RELIC_DEFINITIONS);
 export const BASE_ELEVATOR_SPEED = 380;
 export const MUSEUM_CURATOR_REWARD = 15000;
+
+export interface OreRequirement {
+  [oreId: string]: number;
+}
+
+export interface UpgradeConfig {
+  name: string;
+  desc: string;
+  icon: string;
+  levels: {
+    level: number;
+    value: number;
+    label: string;
+    cost: number;
+    oreReqs?: OreRequirement;
+  }[];
+}
+
+export type UpgradeKey = 'drill' | 'fuelTank' | 'cargo' | 'engine' | 'radar' | 'hull' | 'radiator';
+
+export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
+  drill: {
+    name: 'Matkap Hızı',
+    desc: 'Toprak ve madenleri daha hızlı parçalar',
+    icon: '⚡',
+    levels: [
+      { level: 1, value: 1.25, label: '1.25x (Standart)', cost: 0 },
+      { level: 2, value: 1.85, label: '1.85x (+%48)', cost: 150, oreReqs: { iron: 2 } },
+      { level: 3, value: 2.60, label: '2.60x (+%108)', cost: 550, oreReqs: { silver: 3 } },
+      { level: 4, value: 3.75, label: '3.75x (Kaya Kırıcı)', cost: 1600, oreReqs: { gold: 3 } },
+      { level: 5, value: 5.50, label: '5.50x (Ultra Matkap)', cost: 4200, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  },
+  fuelTank: {
+    name: 'Yakıt Tankı',
+    desc: 'Daha derin maden seferleri için kapasite',
+    icon: '🛢️',
+    levels: [
+      { level: 1, value: 100, label: '100 Litre', cost: 0 },
+      { level: 2, value: 160, label: '160 Litre', cost: 120, oreReqs: { iron: 2 } },
+      { level: 3, value: 240, label: '240 Litre', cost: 500, oreReqs: { silver: 3 } },
+      { level: 4, value: 360, label: '360 Litre', cost: 1500, oreReqs: { gold: 3 } },
+      { level: 5, value: 520, label: '520 Litre', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  },
+  cargo: {
+    name: 'Kargo Kapasitesi',
+    desc: 'Tek seferde daha fazla maden taşıma haznesi',
+    icon: '🎒',
+    levels: [
+      { level: 1, value: 10, label: '10 Adet', cost: 0 },
+      { level: 2, value: 16, label: '16 Adet', cost: 100, oreReqs: { iron: 2 } },
+      { level: 3, value: 25, label: '25 Adet', cost: 500, oreReqs: { silver: 3 } },
+      { level: 4, value: 40, label: '40 Adet', cost: 1500, oreReqs: { gold: 3 } },
+      { level: 5, value: 65, label: '65 Adet', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  },
+  engine: {
+    name: 'Motor İtki Gücü',
+    desc: 'Yukarı tırmanış hızını ve kaçış gücünü artırır',
+    icon: '🚀',
+    levels: [
+      { level: 1, value: 1500, label: '1500 kW', cost: 0 },
+      { level: 2, value: 1850, label: '1850 kW', cost: 130, oreReqs: { iron: 2 } },
+      { level: 3, value: 2300, label: '2300 kW', cost: 520, oreReqs: { silver: 3 } },
+      { level: 4, value: 2850, label: '2850 kW', cost: 1550, oreReqs: { gold: 3 } },
+      { level: 5, value: 3600, label: '3600 kW', cost: 4000, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  },
+  radar: {
+    name: 'Yeraltı Radarı',
+    desc: 'Sis altındaki madenleri daha uzaktan tespit eder',
+    icon: '📡',
+    levels: [
+      { level: 1, value: 2.5, label: '2.5 Blok (Temel)', cost: 0 },
+      { level: 2, value: 3.5, label: '3.5 Blok (+%40)', cost: 140, oreReqs: { iron: 2 } },
+      { level: 3, value: 4.5, label: '4.5 Blok (+%80)', cost: 520, oreReqs: { silver: 3 } },
+      { level: 4, value: 5.8, label: '5.8 Blok (+%132)', cost: 1550, oreReqs: { gold: 3 } },
+      { level: 5, value: 7.5, label: '7.5 Blok (Derin Tarama)', cost: 3900, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  },
+  hull: {
+    name: 'Gövde Zırhı',
+    desc: 'Maksimum dayanıklılık ve darbe hasarı direnci',
+    icon: '🛡️',
+    levels: [
+      { level: 1, value: 100, label: '100 HP (Standart)', cost: 0 },
+      { level: 2, value: 150, label: '150 HP (-%10 Hasar)', cost: 120, oreReqs: { iron: 2 } },
+      { level: 3, value: 220, label: '220 HP (-%20 Hasar)', cost: 500, oreReqs: { silver: 3 } },
+      { level: 4, value: 320, label: '320 HP (-%30 Hasar)', cost: 1500, oreReqs: { gold: 3 } },
+      { level: 5, value: 450, label: '450 HP (-%40 Hasar)', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  },
+  radiator: {
+    name: 'Termal Radyatör',
+    desc: 'Hararet soğuma hızını artırır ve aşırı ısınmayı önler',
+    icon: '❄️',
+    levels: [
+      { level: 1, value: 20, label: '20%/s (Standart Fan)', cost: 0 },
+      { level: 2, value: 28, label: '28%/s (Sıvı Soğutma - %10 Direnç)', cost: 180, oreReqs: { iron: 2 } },
+      { level: 3, value: 38, label: '38%/s (Termoelektrik - %20 Direnç)', cost: 600, oreReqs: { silver: 3 } },
+      { level: 4, value: 50, label: '50%/s (Kriyojenik - %30 Direnç)', cost: 1750, oreReqs: { gold: 3 } },
+      { level: 5, value: 65, label: '65%/s (Plazma Emici - %40 Direnç)', cost: 4200, oreReqs: { emerald: 3, diamond: 1 } }
+    ]
+  }
+};
+
+export function getUpgradeLevelValue(key: UpgradeKey, level: number): number {
+  const config = UPGRADES[key];
+  if (!config) return 1;
+  const clamped = Math.max(1, Math.min(config.levels.length, Math.floor(level || 1)));
+  return config.levels[clamped - 1].value;
+}

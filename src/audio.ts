@@ -19,17 +19,23 @@ export class SoundEngine {
   private isElevatorHumPlaying = false;
 
   constructor() {
+    if (typeof window === 'undefined') return;
     // User interaction activates AudioContext
     const initAudio = () => {
       this.ensureContext();
       window.removeEventListener('keydown', initAudio);
       window.removeEventListener('click', initAudio);
+      window.removeEventListener('pointerdown', initAudio);
+      window.removeEventListener('touchstart', initAudio);
     };
     window.addEventListener('keydown', initAudio);
     window.addEventListener('click', initAudio);
+    window.addEventListener('pointerdown', initAudio);
+    window.addEventListener('touchstart', initAudio);
   }
 
   private ensureContext(): AudioContext | null {
+    if (typeof window === 'undefined') return null;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
@@ -40,6 +46,32 @@ export class SoundEngine {
       this.ctx.resume();
     }
     return this.ctx;
+  }
+
+  private stopContinuousLoop(
+    osc: OscillatorNode | null,
+    gain: GainNode | null,
+    fadeSec: number
+  ): void {
+    if (!osc || !gain || !this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + fadeSec);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {}
+      };
+      osc.stop(now + fadeSec + 0.01);
+    } catch {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {}
+    }
   }
 
   public toggleMute(): boolean {
@@ -88,22 +120,13 @@ export class SoundEngine {
   }
 
   public stopThrust() {
-    if (!this.isThrustPlaying || !this.thrustGain || !this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      this.thrustGain.gain.setValueAtTime(this.thrustGain.gain.value, now);
-      this.thrustGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-      setTimeout(() => {
-        if (this.thrustOsc) {
-          try { this.thrustOsc.stop(); } catch {}
-          this.thrustOsc.disconnect();
-          this.thrustOsc = null;
-        }
-        this.isThrustPlaying = false;
-      }, 90);
-    } catch {
-      this.isThrustPlaying = false;
-    }
+    if (!this.isThrustPlaying) return;
+    const osc = this.thrustOsc;
+    const gain = this.thrustGain;
+    this.thrustOsc = null;
+    this.thrustGain = null;
+    this.isThrustPlaying = false;
+    this.stopContinuousLoop(osc, gain, 0.08);
   }
 
   // 2. Continuous Mechanical Drill Grind
@@ -139,22 +162,13 @@ export class SoundEngine {
   }
 
   public stopDrill() {
-    if (!this.isDrillPlaying || !this.drillGain || !this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      this.drillGain.gain.setValueAtTime(this.drillGain.gain.value, now);
-      this.drillGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
-      setTimeout(() => {
-        if (this.drillOsc) {
-          try { this.drillOsc.stop(); } catch {}
-          this.drillOsc.disconnect();
-          this.drillOsc = null;
-        }
-        this.isDrillPlaying = false;
-      }, 70);
-    } catch {
-      this.isDrillPlaying = false;
-    }
+    if (!this.isDrillPlaying) return;
+    const osc = this.drillOsc;
+    const gain = this.drillGain;
+    this.drillOsc = null;
+    this.drillGain = null;
+    this.isDrillPlaying = false;
+    this.stopContinuousLoop(osc, gain, 0.06);
   }
 
   // 3. Crystal Gem Collection Chime
@@ -545,22 +559,13 @@ export class SoundEngine {
   }
 
   public stopElevatorHum() {
-    if (!this.isElevatorHumPlaying || !this.elevatorHumGain || !this.ctx) return;
-    try {
-      const now = this.ctx.currentTime;
-      this.elevatorHumGain.gain.setValueAtTime(this.elevatorHumGain.gain.value, now);
-      this.elevatorHumGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-      setTimeout(() => {
-        if (this.elevatorHumOsc) {
-          try { this.elevatorHumOsc.stop(); } catch {}
-          this.elevatorHumOsc.disconnect();
-          this.elevatorHumOsc = null;
-        }
-        this.isElevatorHumPlaying = false;
-      }, 90);
-    } catch {
-      this.isElevatorHumPlaying = false;
-    }
+    if (!this.isElevatorHumPlaying) return;
+    const osc = this.elevatorHumOsc;
+    const gain = this.elevatorHumGain;
+    this.elevatorHumOsc = null;
+    this.elevatorHumGain = null;
+    this.isElevatorHumPlaying = false;
+    this.stopContinuousLoop(osc, gain, 0.08);
   }
 
   // 16. Futuristic Two-Tone Elevator Activation & Arrival Chime

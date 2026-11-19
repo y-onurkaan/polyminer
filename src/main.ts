@@ -1,4 +1,12 @@
-import { GRID_WIDTH, GRID_HEIGHT, TILE_SIZE, SURFACE_ROW, RELIC_DEFINITIONS } from './constants';
+import {
+  GRID_WIDTH,
+  GRID_HEIGHT,
+  TILE_SIZE,
+  SURFACE_ROW,
+  RELIC_DEFINITIONS,
+  ROCK_HARDNESS,
+  MUSEUM_CURATOR_REWARD
+} from './constants';
 import { generateWorld, revealAdjacentTiles } from './world';
 import { renderWorld, renderPlayer, renderRemotePlayers } from './renderer';
 import {
@@ -14,20 +22,30 @@ import { UIManager } from './ui';
 import { updateEffects, renderEffects, addFloatingText } from './effects';
 import { saveGame, loadGame, applyLoadedGame, resetSave, serializeWorld, applySavedGrid } from './save';
 import { updateBoulders, renderBoulders } from './boulders';
-import { NetworkManager } from './network';
+import { NetworkManager, MIN_SHARED_MONEY, MAX_SHARED_MONEY } from './network';
 import { RemotePlayerState, TileType } from './types';
 import { sounds } from './audio';
 
 // Canvas Setup
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+const topHudEl = document.getElementById('top-hud');
+
+function computeCanvasHeight(): number {
+  const hudHeight = topHudEl ? topHudEl.offsetHeight : (window.innerWidth <= 900 ? 95 : 80);
+  return Math.max(360, Math.min(window.innerHeight - hudHeight - 6, 740));
+}
 
 const CANVAS_WIDTH = GRID_WIDTH * TILE_SIZE; // 1152px
-const isMobileInitial = window.innerWidth <= 900;
-const CANVAS_HEIGHT = Math.max(380, Math.min(window.innerHeight - (isMobileInitial ? 95 : 80), 740));
-
 canvas.width = CANVAS_WIDTH;
-canvas.height = CANVAS_HEIGHT;
+canvas.height = computeCanvasHeight();
+
+// Camera State
+let cameraY = 0;
+const minCameraY = 0;
+function getMaxCameraY(): number {
+  return Math.max(0, GRID_HEIGHT * TILE_SIZE - canvas.height);
+}
 
 // World & Player State
 const world = generateWorld();
@@ -39,6 +57,7 @@ const remotePlayers: Map<string, RemotePlayerState> = new Map();
 // Playtime & Autosave
 let playTime = 0;
 let autoSaveTimer = 0;
+let loadedSavedGame = false;
 
 // Attempt auto-load on start with safety fallback
 try {
@@ -46,9 +65,9 @@ try {
   if (savedGame) {
     applyLoadedGame(savedGame, player, world);
     playTime = savedGame.playTime || 0;
-    setTimeout(() => {
-      addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, '💾 Kayıt Yüklendi!', '#38bdf8');
-    }, 350);
+    loadedSavedGame = true;
+    const targetCameraY = player.y - canvas.height / 2 + PLAYER_HEIGHT / 2;
+    cameraY = Math.max(minCameraY, Math.min(getMaxCameraY(), targetCameraY));
   }
 } catch (err) {
   console.error('[POLYMINER] Auto-load error, resetting corrupt save:', err);
@@ -57,6 +76,9 @@ try {
 
 // UI Manager
 const uiManager = new UIManager();
+if (loadedSavedGame) {
+  uiManager.showToast('💾 Kayıt Yüklendi!', '#38bdf8', 2200);
+}
 
 let wasGuestSession = false;
 let isReloading = false;
@@ -66,17 +88,19 @@ const network = new NetworkManager({
   getGridSyncData: () => serializeWorld(world),
   getSharedMoney: () => player.money,
   getDiscoveredRelics: () => player.discoveredRelics || [],
+  getMuseumRewardClaimed: () => !!player.museumRewardClaimed,
   onWelcomeSync: (data) => {
     wasGuestSession = true;
     if (data.grid && Array.isArray(data.grid) && data.grid.length === GRID_HEIGHT) {
       applySavedGrid(data.grid, world);
     }
-    if (typeof data.sharedMoney === 'number' && Number.isFinite(data.sharedMoney) && data.sharedMoney >= 0) {
-      player.money = Math.floor(data.sharedMoney);
+    if (typeof data.sharedMoney === 'number' && Number.isFinite(data.sharedMoney) && data.sharedMoney >= MIN_SHARED_MONEY) {
+      player.money = Math.trunc(data.sharedMoney);
     }
     if (Array.isArray(data.discoveredRelics)) {
       player.discoveredRelics = data.discoveredRelics.filter(id => typeof id === 'string' && id in RELIC_DEFINITIONS);
     }
+    player.museumRewardClaimed = !!data.museumRewardClaimed;
     uiManager.showToast('🗺️ Host Haritası & Ortak Kasa Eşitlendi!', '#10b981');
   },
   onRemotePlayerUpdate: (rp) => {
@@ -107,20 +131,33 @@ const network = new NetworkManager({
           tile.hardness = 0;
           tile.revealed = true;
           revealAdjacentTiles(world, data.gx, data.gy);
+        } else if (data.tileType === TileType.ROCK) {
+          tile.type = TileType.ROCK;
+          delete tile.ore;
+          tile.hardness = ROCK_HARDNESS;
+          tile.revealed = true;
         }
       }
     }
   },
   onSharedWalletUpdate: (data) => {
-    if (typeof data.money === 'number' && Number.isFinite(data.money) && data.money >= 0) {
-      player.money = Math.floor(data.money);
+    if (
+      typeof data.money === 'number' &&
+      Number.isFinite(data.money) &&
+      data.money >= MIN_SHARED_MONEY &&
+      data.money <= MAX_SHARED_MONEY
+    ) {
+      player.money = Math.trunc(data.money);
     }
     const centerRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
     const depthMeters = Math.max(0, (centerRow - SURFACE_ROW) * 2);
     uiManager.updateHUD(player, depthMeters, false);
+    uiManager.refreshShopIfOpen();
 
-    if (data.actorName !== network.localName) {
-      const change = Number(data.changeAmount) || 0;
+    const change = Number(data.changeAmount) || 0;
+    if (change === 0) {
+      uiManager.showToast(`⚠️ Bakiye eşitlendi (${data.reason})`, '#f59e0b');
+    } else if (data.actorName !== network.localName) {
       const isGain = change > 0;
       const msg = isGain
         ? `🤝 [${data.actorName}] +$${change.toLocaleString()} kazandı! (${data.reason})`
@@ -137,6 +174,28 @@ const network = new NetworkManager({
         sounds.playRelicFound();
       }
     }
+  },
+  onMuseumRewardClaimed: (data) => {
+    player.museumRewardClaimed = true;
+    if (data.grantLocally) {
+      player.money += MUSEUM_CURATOR_REWARD;
+      network.sendWalletDelta(MUSEUM_CURATOR_REWARD, 'Müze Küratör Ödülü');
+      sounds.playVictoryFanfare();
+      addFloatingText(
+        player.x + PLAYER_WIDTH / 2,
+        player.y - 14,
+        `🏆 +$${MUSEUM_CURATOR_REWARD.toLocaleString()} MÜZE ÖDÜLÜ!`,
+        '#f59e0b'
+      );
+    } else {
+      sounds.playRelicFound();
+    }
+    uiManager.showToast(
+      `🏛️ [${data.actorName}] Müze Küratör Ödülünü aldı (+$${MUSEUM_CURATOR_REWARD.toLocaleString()})!`,
+      '#f59e0b'
+    );
+    uiManager.refreshShopIfOpen();
+    safeSaveGame();
   },
   onVictory: (data) => {
     sounds.playVictoryFanfare();
@@ -195,7 +254,7 @@ window.addEventListener('polyminer:tile-changed', (e: any) => {
 window.addEventListener('polyminer:wallet-changed', (e: any) => {
   const d = e.detail;
   if (d && typeof d.changeAmount === 'number') {
-    network.sendWalletDelta(d.changeAmount, d.reason || 'Ortak İşlem');
+    network.sendWalletDelta(d.changeAmount, d.reason || 'Ortak İşlem', !!d.allowDebt);
   }
 });
 
@@ -206,11 +265,43 @@ window.addEventListener('polyminer:relic-discovered', (e: any) => {
   }
 });
 
+window.addEventListener('polyminer:museum-claim', () => {
+  const status = network.requestMuseumRewardClaim();
+  if (status === 'already_claimed') {
+    player.museumRewardClaimed = true;
+    uiManager.refreshShopIfOpen();
+    return;
+  }
+  if (status === 'requested') {
+    uiManager.showToast('⏳ Müze ödülü Host onayına gönderildi...', '#38bdf8');
+    return;
+  }
+
+  player.museumRewardClaimed = true;
+  player.money += MUSEUM_CURATOR_REWARD;
+  sounds.playVictoryFanfare();
+  addFloatingText(
+    player.x + PLAYER_WIDTH / 2,
+    player.y - 14,
+    `🏆 +$${MUSEUM_CURATOR_REWARD.toLocaleString()} MÜZE ÖDÜLÜ!`,
+    '#f59e0b'
+  );
+  if (status === 'granted') {
+    network.sendWalletDelta(MUSEUM_CURATOR_REWARD, 'Müze Küratör Ödülü');
+  }
+  safeSaveGame();
+  uiManager.refreshShopIfOpen();
+});
+
 // Victory Event Listener (When 550m Ancient Core is mined/blasted)
 window.addEventListener('polyminer:victory', (e: any) => {
   const winner = e.detail?.winnerName || player.name || network.localName || 'Madenci';
-  network.broadcastVictory(winner);
-  uiManager.showVictory(playTime, player, winner);
+  if (network.isConnected) {
+    network.broadcastVictory(winner);
+    uiManager.showVictory(playTime, player, winner);
+  } else {
+    uiManager.showVictory(playTime, player);
+  }
   safeSaveGame();
 });
 
@@ -225,21 +316,7 @@ if (btnResetGame) {
   });
 }
 
-// Top HUD horizontal mousewheel scroll support
-const topHudEl = document.getElementById('top-hud');
-if (topHudEl) {
-  topHudEl.addEventListener('wheel', (e: WheelEvent) => {
-    if (e.deltaY !== 0) {
-      e.preventDefault();
-      topHudEl.scrollLeft += e.deltaY;
-    }
-  }, { passive: false });
-}
-
-// Camera State
-let cameraY = 0;
-const minCameraY = 0;
-const maxCameraY = Math.max(0, GRID_HEIGHT * TILE_SIZE - CANVAS_HEIGHT);
+// Camera State already initialized above
 
 // Keyboard Tracking
 const keysDown: Record<string, boolean> = {};
@@ -263,27 +340,24 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
   }
 
   // Quick consumable triggers and elevator double-tap when not in modal
-  const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
-  if (!isAnyModalOpen) {
-    if (!e.repeat) {
-      const now = performance.now();
-      const isUpKey = e.code === 'KeyW' || e.code === 'ArrowUp' || e.key === 'w' || e.key === 'W';
-      const isDownKey = e.code === 'KeyS' || e.code === 'ArrowDown' || e.key === 's' || e.key === 'S';
+  if (!uiManager.isAnyModalOpen() && !e.repeat) {
+    const now = performance.now();
+    const isUpKey = e.code === 'KeyW' || e.code === 'ArrowUp' || e.key === 'w' || e.key === 'W';
+    const isDownKey = e.code === 'KeyS' || e.code === 'ArrowDown' || e.key === 's' || e.key === 'S';
 
-      if (isUpKey) {
-        if (now - lastUpTapTime <= DOUBLE_TAP_WINDOW_MS) {
-          startElevatorAutoGlide(player, world, 'up');
-          lastUpTapTime = 0;
-        } else {
-          lastUpTapTime = now;
-        }
-      } else if (isDownKey) {
-        if (now - lastDownTapTime <= DOUBLE_TAP_WINDOW_MS) {
-          startElevatorAutoGlide(player, world, 'down');
-          lastDownTapTime = 0;
-        } else {
-          lastDownTapTime = now;
-        }
+    if (isUpKey) {
+      if (now - lastUpTapTime <= DOUBLE_TAP_WINDOW_MS) {
+        startElevatorAutoGlide(player, world, 'up');
+        lastUpTapTime = 0;
+      } else {
+        lastUpTapTime = now;
+      }
+    } else if (isDownKey) {
+      if (now - lastDownTapTime <= DOUBLE_TAP_WINDOW_MS) {
+        startElevatorAutoGlide(player, world, 'down');
+        lastDownTapTime = 0;
+      } else {
+        lastDownTapTime = now;
       }
     }
 
@@ -295,8 +369,6 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
       useConsumableItem(player, 'teleporter', world);
     } else if (e.code === 'KeyX' || e.key.toLowerCase() === 'x') {
       useConsumableItem(player, 'dynamite', world);
-    } else if (e.code === 'KeyC' || e.key.toLowerCase() === 'c') {
-      useConsumableItem(player, 'elevatorRails', world);
     }
   }
 });
@@ -317,9 +389,7 @@ window.addEventListener('blur', () => {
 });
 
 window.addEventListener('resize', () => {
-  const isMobile = window.innerWidth <= 900;
-  const newHeight = Math.max(380, Math.min(window.innerHeight - (isMobile ? 95 : 80), 740));
-  canvas.height = newHeight;
+  canvas.height = computeCanvasHeight();
 });
 
 // Mobile Virtual Gamepad Bindings
@@ -349,8 +419,7 @@ function setupMobileControls() {
       if (primaryKey === 'ArrowRight') { keysDown['KeyD'] = true; keysDown['d'] = true; keysDown['D'] = true; }
 
       // Double-tap for elevator auto-glide
-      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen();
-      if (!isAnyModalOpen) {
+      if (!uiManager.isAnyModalOpen()) {
         const now = performance.now();
         if (isUp) {
           if (now - lastUpTapTime <= DOUBLE_TAP_WINDOW_MS) {
@@ -400,8 +469,7 @@ function setupMobileControls() {
       keysDown['KeyC'] = true;
       keysDown['c'] = true;
       keysDown['C'] = true;
-      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen();
-      if (!isAnyModalOpen) {
+      if (!uiManager.isAnyModalOpen()) {
         useConsumableItem(player, 'elevatorRails', world);
       }
     };
@@ -424,8 +492,7 @@ function setupMobileControls() {
     btn.addEventListener('pointerdown', (e: Event) => {
       e.preventDefault();
       btn.classList.add('active');
-      const isAnyModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen();
-      if (!isAnyModalOpen) {
+      if (!uiManager.isAnyModalOpen()) {
         useConsumableItem(player, itemKey, world);
       }
     });
@@ -445,12 +512,14 @@ function setupMobileControls() {
 
 setupMobileControls();
 
-// Smooth Camera Follow
-function updateCamera() {
+// Smooth Frame-Rate Independent Camera Follow
+function updateCamera(deltaTime: number) {
+  const maxCameraY = getMaxCameraY();
   const targetCameraY = player.y - canvas.height / 2 + PLAYER_HEIGHT / 2;
   const clampedTarget = Math.max(minCameraY, Math.min(maxCameraY, targetCameraY));
 
-  cameraY += (clampedTarget - cameraY) * 0.12;
+  const alpha = 1 - Math.exp(-7.5 * deltaTime);
+  cameraY += (clampedTarget - cameraY) * alpha;
 
   if (cameraY < minCameraY) cameraY = minCameraY;
   if (cameraY > maxCameraY) cameraY = maxCameraY;
@@ -459,6 +528,7 @@ function updateCamera() {
 // Station & Fuel Logic
 let refuelAccumulator = 0;
 let repairAccumulator = 0;
+let pendingStationSpend = 0;
 
 function handleStations(dt: number): boolean {
   let isRefueling = false;
@@ -481,6 +551,7 @@ function handleStations(dt: number): boolean {
         const moneyToDeduct = Math.floor(refuelAccumulator);
         const prevMoney = player.money;
         player.money -= moneyToDeduct;
+        pendingStationSpend += moneyToDeduct;
         refuelAccumulator -= moneyToDeduct;
 
         if (prevMoney >= 0 && player.money < 0) {
@@ -502,6 +573,7 @@ function handleStations(dt: number): boolean {
         const moneyToDeduct = Math.floor(repairAccumulator);
         const prevMoney = player.money;
         player.money -= moneyToDeduct;
+        pendingStationSpend += moneyToDeduct;
         repairAccumulator -= moneyToDeduct;
 
         if (prevMoney >= 0 && player.money < 0) {
@@ -517,6 +589,19 @@ function handleStations(dt: number): boolean {
     }
     player.heat = 0;
     player.heatLockoutTimer = 0;
+  }
+
+  // Batch-sync station expenses to Co-op shared wallet
+  if (pendingStationSpend >= 10 || (!isRefueling && pendingStationSpend > 0)) {
+    window.dispatchEvent(new CustomEvent('polyminer:wallet-changed', {
+      detail: {
+        newMoney: player.money,
+        changeAmount: -pendingStationSpend,
+        reason: 'İstasyon İkmali',
+        allowDebt: true
+      }
+    }));
+    pendingStationSpend = 0;
   }
 
   // 2. SHOP PAD (y === 3, x >= GRID_WIDTH - 3)
@@ -535,9 +620,9 @@ function handleStations(dt: number): boolean {
     }
   }
 
-  // 3. OUT OF FUEL OR HULL DESTROYED UNDERGROUND CHECK
+  // 3. HULL DESTROYED (ANYWHERE) OR OUT OF FUEL UNDERGROUND CHECK
   const isUnderground = player.y > (SURFACE_ROW + 0.5) * TILE_SIZE;
-  if (player.hull <= 0 && isUnderground && !uiManager.isTowOpen()) {
+  if (player.hull <= 0 && !uiManager.isTowOpen()) {
     towPlayerToSurface(player, 'hull');
     uiManager.showTowModal('hull');
   } else if (player.fuel <= 0 && isUnderground && !uiManager.isTowOpen()) {
@@ -566,7 +651,7 @@ function gameLoop(now: number) {
     }
   }
 
-  const isModalOpen = uiManager.isShopOpen() || uiManager.isTowOpen() || uiManager.isHelpOpen() || uiManager.isVictoryOpen() || uiManager.isCoopOpen();
+  const isModalOpen = uiManager.isAnyModalOpen();
 
   // Periodic 5-Second Autosave
   playTime += deltaTime;
@@ -586,11 +671,13 @@ function gameLoop(now: number) {
 
   // 2. Physics, Controls & Visual Effects
   updatePlayer(player, world, keysDown, deltaTime, isModalOpen);
-  updateBoulders(deltaTime, world, player);
+  if (!isModalOpen) {
+    updateBoulders(deltaTime, world, player);
+  }
   updateEffects(deltaTime);
 
   // 3. Camera Tracking
-  updateCamera();
+  updateCamera(deltaTime);
 
   // Broadcast local player state at 20 Hz
   network.broadcastPlayerState({

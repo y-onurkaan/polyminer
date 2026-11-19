@@ -58,7 +58,7 @@ export function updateEffects(dt: number): void {
     const ft = floatingTexts[i];
     ft.lifetime -= dt;
     ft.y += ft.vy * dt;
-    ft.vy *= 0.96; // slight deceleration
+    ft.vy *= Math.pow(0.96, dt * 60); // frame-rate independent deceleration
     ft.alpha = Math.max(0, ft.lifetime / ft.maxLifetime);
 
     if (ft.lifetime <= 0) {
