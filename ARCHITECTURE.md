@@ -33,8 +33,9 @@ Güncel sayısal değerler için kaynak olarak bu dosya esastır.
 | `player.ts` | Fizik, matkap, yakıt/hararet/hasar, asansör rayı, dinamit, sandık, çekme ve ışınlanma (`updatePlayer`) |
 | `boulders.ts` | Düşen heyelan kayaları |
 | `effects.ts` | Parçacık havuzu (`MAX_PARTICLES`), ekran sarsıntısı (`addScreenShake`), hasar vinyeti (`addDamageFlash`), biyom geçiş bandı, yüzen metinler ve şok dalgaları |
-| `renderer.ts` | Dünya, aşamalı kazı çatlakları, biyom ortam tozları/kıvılcımları, viewport vinyet/uyarı katmanları (`renderScreenOverlays`), ayrıştırılmış offscreen mini-radar (`renderMiniRadar`) ve uzak oyuncular |
-| `ui.ts` | Dirty-check önbellekli HUD, tıklanabilir sarf rozetleri, dükkân, geliştirmeler (`UPGRADES`), müze, Co-op lobi/roster, yardım paneli (`UIManager`) |
+| `renderer.ts` | Dünya, blok dokuları/autotiling, tekli yontulmuş çok yüzlü cevherler (`getOreVisualStyle`, `drawFacetedPolygon`), birleşik yüzey pistleri, aracın seviyeyle görsel evrimi, yumuşak sis, katman çizgili offscreen mini-radar (`renderMiniRadar`) ve viewport vinyetleri (`renderScreenOverlays`) |
+| `ui.ts` | Dirty-check önbellekli SVG HUD, `tabular-nums`, tıklanabilir rozetler, çokgenli dükkân/5 parçalı seviye barları (`UPGRADES`), müze, Co-op lobi ve yardım paneli (`UIManager`) |
+| `icons.ts` | Minimalist geometrik SVG ikon kütüphanesi (`UI_ICONS`), çok yüzlü maden SVG (`renderPolygonSvg`) ve seviye barı üreticisi (`renderLevelSegmentsHtml`) |
 | `save.ts` | Çoklu slot `localStorage` kaydı / yüklemesi (`polyminer_save_v1`, `polyminer_save_coop_v1`), şema sürümü ve migrasyon |
 | `audio.ts` | Web Audio ses motoru (`SoundEngine`), dinamik matkap tonu modülasyonu, blok kırılma / yükseltme / biyom geçiş sesleri |
 | `style.css` | Ayrıştırılmış HUD, modal panelleri ve dokunmatik kontrol stilleri |

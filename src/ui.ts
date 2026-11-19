@@ -15,6 +15,7 @@ import {
 import { sounds } from './audio';
 import { addFloatingText, spawnSparkBurst } from './effects';
 import { emitGameEvent } from './events';
+import { UI_ICONS, renderPolygonSvg, renderLevelSegmentsHtml } from './icons';
 
 export { UPGRADES, type UpgradeConfig, type OreRequirement };
 
@@ -50,12 +51,12 @@ export class UIManager {
   private badgeRail: HTMLElement;
   private badgeMuseum: HTMLElement;
 
-  private badgeFuelIcon: HTMLElement | null = null;
-  private badgeRepairIcon: HTMLElement | null = null;
-  private badgeTeleportIcon: HTMLElement | null = null;
-  private badgeDynamiteIcon: HTMLElement | null = null;
-  private badgeRailIcon: HTMLElement | null = null;
-  private badgeMuseumIcon: HTMLElement | null = null;
+  private badgeFuelCount: HTMLElement | null = null;
+  private badgeRepairCount: HTMLElement | null = null;
+  private badgeTeleportCount: HTMLElement | null = null;
+  private badgeDynamiteCount: HTMLElement | null = null;
+  private badgeRailCount: HTMLElement | null = null;
+  private badgeMuseumCount: HTMLElement | null = null;
 
   private touchBadgeRail: HTMLElement | null = null;
   private touchBadgeFuel: HTMLElement | null = null;
@@ -177,12 +178,12 @@ export class UIManager {
     this.badgeRail = document.getElementById('badge-rail') as HTMLElement;
     this.badgeMuseum = document.getElementById('badge-museum') as HTMLElement;
 
-    this.badgeFuelIcon = this.badgeFuel?.querySelector('.hud-badge-icon') ?? null;
-    this.badgeRepairIcon = this.badgeRepair?.querySelector('.hud-badge-icon') ?? null;
-    this.badgeTeleportIcon = this.badgeTeleport?.querySelector('.hud-badge-icon') ?? null;
-    this.badgeDynamiteIcon = this.badgeDynamite?.querySelector('.hud-badge-icon') ?? null;
-    this.badgeRailIcon = this.badgeRail?.querySelector('.hud-badge-icon') ?? null;
-    this.badgeMuseumIcon = this.badgeMuseum?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeFuelCount = this.badgeFuel?.querySelector('.hud-badge-count') ?? this.badgeFuel?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeRepairCount = this.badgeRepair?.querySelector('.hud-badge-count') ?? this.badgeRepair?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeTeleportCount = this.badgeTeleport?.querySelector('.hud-badge-count') ?? this.badgeTeleport?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeDynamiteCount = this.badgeDynamite?.querySelector('.hud-badge-count') ?? this.badgeDynamite?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeRailCount = this.badgeRail?.querySelector('.hud-badge-count') ?? this.badgeRail?.querySelector('.hud-badge-icon') ?? null;
+    this.badgeMuseumCount = this.badgeMuseum?.querySelector('.hud-badge-count') ?? this.badgeMuseum?.querySelector('.hud-badge-icon') ?? null;
 
     this.touchBadgeRail = document.getElementById('touch-badge-rail');
     this.touchBadgeFuel = document.getElementById('touch-badge-fuel');
@@ -283,7 +284,7 @@ export class UIManager {
 
     this.btnToggleSound.addEventListener('click', () => {
       const isMuted = sounds.toggleMute();
-      this.btnToggleSound.innerText = isMuted ? '🔇' : '🔊';
+      this.btnToggleSound.innerHTML = isMuted ? UI_ICONS.soundOff : UI_ICONS.soundOn;
       this.btnToggleSound.title = isMuted ? 'Sesi Aç' : 'Sesi Kapat';
     });
 
@@ -375,16 +376,15 @@ export class UIManager {
 
   private syncConsumableBadge(
     badgeEl: HTMLElement | null,
-    iconEl: HTMLElement | null,
+    countEl: HTMLElement | null,
     touchEl: HTMLElement | null,
     count: number,
     prevCount: number | undefined,
-    emoji: string,
     activeColor: string,
     titleText: string
   ): number {
     if (count === prevCount) return count;
-    if (iconEl) iconEl.textContent = `${emoji} ${count}`;
+    if (countEl) countEl.textContent = `${count}`;
     if (badgeEl) {
       badgeEl.title = titleText;
       badgeEl.style.color = count > 0 ? activeColor : '#64748b';
@@ -461,7 +461,9 @@ export class UIManager {
     if (this.lastHud.isDebt !== isDebt) {
       this.lastHud.isDebt = isDebt;
       if (this.moneyLabel) {
-        this.moneyLabel.innerText = isDebt ? '💳 BORÇ:' : '💰 BAKİYE:';
+        this.moneyLabel.innerHTML = isDebt
+          ? `${UI_ICONS.debt}<span>BORÇ:</span>`
+          : `${UI_ICONS.coin}<span>BAKİYE:</span>`;
         this.moneyLabel.style.color = isDebt ? '#ef4444' : '#94a3b8';
       }
       this.moneyVal.style.color = isDebt ? '#ef4444' : '#facc15';
@@ -471,54 +473,49 @@ export class UIManager {
       this.moneyVal.innerText = moneyText;
     }
 
-    // 6. Consumable Items Badges & Mobile Touch Badges (Dirty-checked, zero innerHTML rebuild)
+    // 6. Consumable Items Badges & Mobile Touch Badges (Dirty-checked, preserves inline SVGs)
     this.lastHud.fuelCount = this.syncConsumableBadge(
       this.badgeFuel,
-      this.badgeFuelIcon,
+      this.badgeFuelCount,
       this.touchBadgeFuel,
       player.inventory.fuelCanister || 0,
       this.lastHud.fuelCount,
-      '⛽',
       '#38bdf8',
       `Yedek Yakıt [R]: x${player.inventory.fuelCanister || 0} (Acil durumda yakıt ekler)`
     );
     this.lastHud.repairCount = this.syncConsumableBadge(
       this.badgeRepair,
-      this.badgeRepairIcon,
+      this.badgeRepairCount,
       this.touchBadgeRepair,
       player.inventory.repairKit || 0,
       this.lastHud.repairCount,
-      '🔧',
       '#4ade80',
       `Tamir Kiti [T]: x${player.inventory.repairKit || 0} (Gövdeyi 50 HP onarır ve harareti sıfırlar)`
     );
     this.lastHud.tpCount = this.syncConsumableBadge(
       this.badgeTeleport,
-      this.badgeTeleportIcon,
+      this.badgeTeleportCount,
       this.touchBadgeTp,
       player.inventory.teleporter || 0,
       this.lastHud.tpCount,
-      '🌀',
       '#38bdf8',
       `Yüzeye Işınlayıcı [Q]: x${player.inventory.teleporter || 0} (Acil yüzeye ışınlanma)`
     );
     this.lastHud.dynCount = this.syncConsumableBadge(
       this.badgeDynamite,
-      this.badgeDynamiteIcon,
+      this.badgeDynamiteCount,
       this.touchBadgeDyn,
       player.inventory.dynamite || 0,
       this.lastHud.dynCount,
-      '💣',
       '#facc15',
       `Sismik Dinamit [X]: x${player.inventory.dynamite || 0} (Çevredeki kayaları patlatır)`
     );
     this.lastHud.railCount = this.syncConsumableBadge(
       this.badgeRail,
-      this.badgeRailIcon,
+      this.badgeRailCount,
       this.touchBadgeRail,
       player.inventory.elevatorRails || 0,
       this.lastHud.railCount,
-      '🏗️',
       '#06b6d4',
       `Asansör Rayı [C]: x${player.inventory.elevatorRails || 0} (Dikey asansör hattı döşer)`
     );
@@ -526,7 +523,7 @@ export class UIManager {
     const relicCount = player.discoveredRelics?.length || 0;
     if (this.badgeMuseum && this.lastHud.relicCount !== relicCount) {
       this.lastHud.relicCount = relicCount;
-      if (this.badgeMuseumIcon) this.badgeMuseumIcon.textContent = `🏛️ ${relicCount}/6`;
+      if (this.badgeMuseumCount) this.badgeMuseumCount.textContent = `${relicCount}/6`;
       this.badgeMuseum.title = `Arkeoloji Müzesi & Fosiller: ${relicCount}/6 (Toplanan eserler)`;
       this.badgeMuseum.style.color = relicCount > 0 ? '#f59e0b' : '#64748b';
     }
@@ -882,14 +879,14 @@ export class UIManager {
 
     if (this.shopPlayerBalance && this.shopBalanceLabel && this.shopBalanceVal) {
       if (player.money < 0) {
-        this.shopBalanceLabel.innerText = '💳 MEVCUT BORÇ:';
+        this.shopBalanceLabel.innerHTML = `${UI_ICONS.debt} <span>MEVCUT BORÇ:</span>`;
         this.shopBalanceLabel.style.color = '#ef4444';
         this.shopBalanceVal.innerText = `-$${formatShopMoney(Math.abs(player.money))}`;
         this.shopBalanceVal.style.color = '#ef4444';
         this.shopPlayerBalance.style.borderColor = '#ef4444';
         this.shopPlayerBalance.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.35)';
       } else {
-        this.shopBalanceLabel.innerText = '💰 MEVCUT BAKİYE:';
+        this.shopBalanceLabel.innerHTML = `${UI_ICONS.coin} <span>MEVCUT BAKİYE:</span>`;
         this.shopBalanceLabel.style.color = '#94a3b8';
         this.shopBalanceVal.innerText = `$${formatShopMoney(player.money)}`;
         this.shopBalanceVal.style.color = '#facc15';
@@ -929,7 +926,7 @@ export class UIManager {
         html += `
           <div class="ore-row">
             <div style="display:flex; align-items:center; gap:8px;">
-              <span class="ore-pill" style="background:${item.ore.color};">${item.ore.sides}G</span>
+              ${renderPolygonSvg(item.ore.sides, item.ore.color, 20)}
               <strong>${item.ore.name}</strong>
               <span style="color:#94a3b8; font-size:11px;">(${item.count} Adet × $${item.ore.value})</span>
             </div>
@@ -955,6 +952,7 @@ export class UIManager {
       const currentLevelInfo = config.levels[currentLevel - 1];
       const nextLevelInfo = config.levels[currentLevel];
       const isMax = !nextLevelInfo;
+      const upgradeIcon = UI_ICONS[key as keyof typeof UI_ICONS] || '';
 
       let hasOres = true;
       let oreReqHtml = '';
@@ -964,11 +962,12 @@ export class UIManager {
           const ownedCount = player.cargo.filter(o => o.id === oreId).length;
           const oreDef = ORES.find(o => o.id === oreId);
           const oreName = oreDef ? oreDef.name : oreId;
+          const orePoly = oreDef ? renderPolygonSvg(oreDef.sides, oreDef.color, 14) : '';
           const isMet = ownedCount >= reqCount;
           if (!isMet) hasOres = false;
           const badgeColor = isMet ? '#4ade80' : '#f87171';
           const borderColor = isMet ? '#15803d' : '#991b1b';
-          badges.push(`<span style="color:${badgeColor}; font-size:9.5px; font-weight:bold; background:#0f172a; padding:1px 5px; border-radius:3px; border:1px solid ${borderColor};">${reqCount}x ${oreName} (${ownedCount}/${reqCount})</span>`);
+          badges.push(`<span class="ore-req-chip" style="color:${badgeColor}; border:1px solid ${borderColor};">${orePoly} ${reqCount}× ${oreName} (${ownedCount}/${reqCount})</span>`);
         }
         oreReqHtml = `
           <div style="display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:4px;">
@@ -982,9 +981,10 @@ export class UIManager {
         <div class="upgrade-card ${isMax ? 'maxed' : ''}">
           <div style="display:flex; justify-content:space-between; align-items:flex-start;">
             <div>
-              <div style="font-weight:bold; font-size:13px; color:#f8fafc;">
-                ${config.icon} ${config.name}
-                <span class="level-badge">Seviye ${currentLevel}/${config.levels.length}</span>
+              <div style="font-weight:bold; font-size:13px; color:#f8fafc; display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                ${upgradeIcon} <span>${config.name}</span>
+                ${renderLevelSegmentsHtml(currentLevel, config.levels.length)}
+                <span class="level-badge">Sv.${currentLevel}/${config.levels.length}</span>
               </div>
               <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
                 ${config.desc}
@@ -1014,12 +1014,20 @@ export class UIManager {
     this.upgradesContainer.innerHTML = upgradesHtml;
 
     // 3. Consumables Section (rendered in grid)
+    const consumableIconMap: Record<string, string> = {
+      fuelCanister: UI_ICONS.fuel,
+      repairKit: UI_ICONS.repair,
+      teleporter: UI_ICONS.teleporter,
+      dynamite: UI_ICONS.dynamite,
+      elevatorRails: UI_ICONS.rail
+    };
     let consumablesHtml = `
       <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; margin-top:4px;">
     `;
     for (const [key, item] of Object.entries(CONSUMABLES)) {
       const canAfford = player.money >= item.cost;
       const owned = (player.inventory as any)[key] || 0;
+      const cIcon = consumableIconMap[key] || '';
 
       let actionButtons = '';
       if (key === 'elevatorRails') {
@@ -1045,9 +1053,9 @@ export class UIManager {
       const isElevator = key === 'elevatorRails';
       consumablesHtml += `
         <div class="consumable-card" ${isElevator ? 'style="grid-column: span 2;"' : ''}>
-          <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:11px; color:#f8fafc;">
-            <span>[${item.key}] ${item.name}</span>
-            <span style="color:#38bdf8;">x${owned}</span>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-weight:bold; font-size:11px; color:#f8fafc;">
+            <span style="display:inline-flex; align-items:center; gap:5px;">${cIcon} [${item.key}] ${item.name}</span>
+            <span style="color:#38bdf8; font-variant-numeric:tabular-nums;">x${owned}</span>
           </div>
           <div style="font-size:10px; color:#94a3b8; margin:3px 0 6px 0;">${item.desc}</div>
           ${actionButtons}
@@ -1112,7 +1120,7 @@ export class UIManager {
         } else {
           museumHtml += `
             <div class="relic-card locked">
-              <div class="relic-icon">🔒</div>
+              <div class="relic-icon" style="display:flex; align-items:center; justify-content:center;">${UI_ICONS.lock}</div>
               <div class="relic-info">
                 <div style="font-weight:bold; color:#64748b; font-size:10.5px;">Gizli Kalıntı (${relic.minDepth}m - ${relic.maxDepth}m)</div>
                 <div style="color:#475569; font-size:9.5px;">Kazı esnasında keşfedilmeyi bekliyor.</div>
@@ -1157,7 +1165,7 @@ export class UIManager {
   private renderHelpOreTable() {
     let html = `
       <div style="margin-bottom:8px; font-weight:bold; font-size:11px; color:#94a3b8; text-transform:uppercase;">
-        💎 Maden Değer & Sertlik Tablosu
+        <span style="display:inline-flex; align-items:center; gap:5px;">${renderPolygonSvg(8, '#38bdf8', 14)} Maden Değer & Sertlik Tablosu</span>
       </div>
       <table class="help-table">
         <thead>
@@ -1176,9 +1184,9 @@ export class UIManager {
       html += `
         <tr>
           <td><strong style="color:${ore.color};">${ore.name}</strong></td>
-          <td><span class="ore-pill" style="background:${ore.color};">${ore.sides}G</span></td>
-          <td style="color:#facc15; font-weight:bold;">$${ore.value}</td>
-          <td>${depthM}m+</td>
+          <td><span style="display:inline-flex; align-items:center; gap:5px;">${renderPolygonSvg(ore.sides, ore.color, 18)} <span>${ore.sides}G</span></span></td>
+          <td style="color:#facc15; font-weight:bold; font-variant-numeric:tabular-nums;">$${ore.value}</td>
+          <td style="font-variant-numeric:tabular-nums;">${depthM}m+</td>
         </tr>
       `;
     }

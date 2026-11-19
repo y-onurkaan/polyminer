@@ -5,6 +5,7 @@ import {
   GRID_WIDTH,
   GRID_HEIGHT,
   SURFACE_ROW,
+  ORES,
   ORE_DEFINITIONS,
   ROCK_HARDNESS,
   FALL_BRAKE_MULTIPLIER,
@@ -41,6 +42,8 @@ import {
 } from './boulders';
 import { serializeWorld, applySavedGrid, migrateSaveData, applyLoadedGame } from './save';
 import { emitGameEvent, onGameEvent } from './events';
+import { UI_ICONS, renderPolygonSvg, renderLevelSegmentsHtml } from './icons';
+import { getOreVisualStyle } from './renderer';
 import {
   MAX_PARTICLES,
   spawnParticle,
@@ -761,5 +764,88 @@ describe('Polyminer Faz C Game Feel, Particles, Shake & Overlay Tests', () => {
     applyLoadedGame(migrated!, restored, world);
     expect(restored.maxFuel).toBe(60);
     expect(restored.fuel).toBe(60);
+  });
+});
+
+describe('Polyminer Faz D SVG Icons, Polygon & Segmented Level UI Helpers', () => {
+  it('renders regular mineral polygons with exact vertex counts (3G to 12G) and inner facet', () => {
+    for (const [sides, color] of [[3, '#d97706'], [4, '#94a3b8'], [6, '#facc15'], [8, '#38bdf8'], [12, '#ec4899']] as const) {
+      const svg = renderPolygonSvg(sides, color, 18);
+      const matches = [...svg.matchAll(/points="([^"]+)"/g)];
+      expect(matches.length).toBe(2);
+      const outerVerts = matches[0][1].trim().split(/\s+/);
+      const innerVerts = matches[1][1].trim().split(/\s+/);
+      expect(outerVerts.length).toBe(sides);
+      expect(innerVerts.length).toBe(sides);
+      expect(svg).toContain(`fill="${color}"`);
+    }
+  });
+
+  it('renders segmented level bars with accurate filled and maxed states', () => {
+    const lv2 = renderLevelSegmentsHtml(2, 5);
+    expect((lv2.match(/class="level-seg filled"/g) || []).length).toBe(2);
+    expect((lv2.match(/class="level-seg"/g) || []).length).toBe(3);
+    expect(lv2).not.toContain('maxed');
+
+    const lv5 = renderLevelSegmentsHtml(5, 5);
+    expect((lv5.match(/class="level-seg filled maxed"/g) || []).length).toBe(5);
+    expect(lv5).toContain('aria-label="Seviye 5/5"');
+  });
+
+  it('exposes complete SVG icon markup for HUD, upgrades, consumables, and shop controls', () => {
+    for (const [key, markup] of Object.entries(UI_ICONS)) {
+      expect(markup, key).toContain('<svg ');
+      expect(markup, key).toContain('class="ui-svg-icon"');
+      expect(markup, key).toContain('aria-hidden="true"');
+    }
+  });
+
+  it('provides distinct 5-tone faceted material styles for all mineral ores', () => {
+    const materialById: Record<string, string> = {
+      copper: 'metal',
+      iron: 'metal',
+      silver: 'precious_metal',
+      gold: 'precious_metal',
+      emerald: 'gem',
+      diamond: 'gem',
+      ancient_core: 'relic'
+    };
+
+    for (const ore of ORES) {
+      const style = getOreVisualStyle(ore.id, ore.color);
+      expect(style.material, ore.id).toBe(materialById[ore.id]);
+      expect(new Set([style.spec, style.light, style.base, style.shadow, style.deep]).size, ore.id).toBeGreaterThanOrEqual(4);
+      expect(style.veinColor.length).toBeGreaterThan(0);
+
+      if (ore.sides >= 5) {
+        expect(style.sparkle, ore.id).toBe(true);
+      } else {
+        expect(style.sparkle, ore.id).toBe(false);
+      }
+
+      if (ore.sides >= 6) {
+        expect(style.auraRgb, ore.id).toBeTruthy();
+      } else {
+        expect(style.auraRgb, ore.id).toBeUndefined();
+      }
+    }
+  });
+
+  it('adds faceted bevel path layers and silver+ specular glint to polygon SVGs', () => {
+    const copperSvg = renderPolygonSvg(3, '#d97706', 18);
+    expect((copperSvg.match(/<path /g) || []).length).toBeGreaterThanOrEqual(2);
+    expect(copperSvg).not.toContain('<circle ');
+
+    const ironSvg = renderPolygonSvg(4, '#94a3b8', 18);
+    expect((ironSvg.match(/<path /g) || []).length).toBeGreaterThanOrEqual(2);
+    expect(ironSvg).not.toContain('<circle ');
+
+    const silverSvg = renderPolygonSvg(5, '#e2e8f0', 18);
+    expect((silverSvg.match(/<path /g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(silverSvg).toContain('<circle ');
+
+    const diamondSvg = renderPolygonSvg(8, '#38bdf8', 20);
+    expect((diamondSvg.match(/<path /g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(diamondSvg).toContain('<circle ');
   });
 });

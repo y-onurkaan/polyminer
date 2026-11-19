@@ -88,6 +88,9 @@ body {
   flex-shrink: 0;
 }
 .hud-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: #94a3b8;
   font-size: 10px;
   text-transform: uppercase;
@@ -96,6 +99,7 @@ body {
 .hud-value {
   font-weight: bold;
   color: #f8fafc;
+  font-variant-numeric: tabular-nums;
 }
 .gauge-box {
   display: flex;
@@ -175,6 +179,10 @@ body {
   font-weight: 600;
 }
 .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   background: #1e293b;
   border: 1px solid #475569;
   color: #f8fafc;
@@ -185,6 +193,21 @@ body {
   font-family: monospace;
   transition: background 0.15s ease, border-color 0.15s ease;
   flex-shrink: 0;
+}
+.ui-svg-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+#top-hull-text,
+#top-fuel-text,
+#top-temp-text,
+.hud-badge-count,
+#shop-balance-val,
+#shop-total-value,
+.ore-row,
+.stat-comparison {
+  font-variant-numeric: tabular-nums;
 }
 .btn-icon:hover {
   background: #334155;
@@ -451,6 +474,36 @@ body {
   color: #38bdf8;
   border: 1px solid #334155;
   margin-left: 4px;
+}
+.level-segments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.level-seg {
+  width: 11px;
+  height: 5px;
+  border-radius: 1.5px;
+  background: #334155;
+}
+.level-seg.filled {
+  background: #38bdf8;
+}
+.level-seg.filled.maxed {
+  background: #facc15;
+}
+.ore-req-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  font-weight: bold;
+  background: #0f172a;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
 }
 .stat-comparison {
   display: flex;

@@ -1,4 +1,4 @@
-import { Tile, TileType, RemotePlayerState } from './types';
+import { Tile, TileType, RemotePlayerState, OreDefinition } from './types';
 import {
   TILE_SIZE,
   GRID_WIDTH,
@@ -14,6 +14,40 @@ import { getDamageFlashAlpha, getBiomeBanner } from './effects';
 let radarCacheCanvas: HTMLCanvasElement | null = null;
 let radarCacheVersion = -1;
 let radarCacheHeight = 0;
+
+/**
+ * Deterministic fast integer hash in [0, 1) for per-tile visual variety without allocation.
+ */
+function tileHash(x: number, y: number): number {
+  let n = ((x * 374761393) + (y * 668265263)) | 0;
+  n = (n ^ (n >>> 13)) * 1274126177;
+  n = n ^ (n >>> 16);
+  return (n >>> 0) / 4294967296;
+}
+
+function getBiomeHighlightColor(biomeId: string): string {
+  switch (biomeId) {
+    case 'quartz':
+      return '#4a3d69';
+    case 'basalt':
+      return '#41524a';
+    case 'magma':
+      return '#6b2924';
+    default:
+      return '#785636';
+  }
+}
+
+function isRevealedOpen(world: Tile[][], gx: number, gy: number): boolean {
+  if (gy < 0 || gy >= world.length || gx < 0 || gx >= GRID_WIDTH) return false;
+  const t = world[gy]?.[gx];
+  return !!(t && t.revealed && t.type === TileType.EMPTY);
+}
+
+function isRevealedNeighbor(world: Tile[][], gx: number, gy: number): boolean {
+  if (gy < 0 || gy >= world.length || gx < 0 || gx >= GRID_WIDTH) return false;
+  return !!world[gy]?.[gx]?.revealed;
+}
 
 // Parallax background stars
 const STARS = Array.from({ length: 48 }, () => ({
@@ -218,6 +252,398 @@ export function drawPolygon(
   }
 
   ctx.restore();
+}
+
+export interface OreVisualStyle {
+  material: 'metal' | 'precious_metal' | 'gem' | 'relic';
+  spec: string;
+  light: string;
+  base: string;
+  shadow: string;
+  deep: string;
+  veinColor: string;
+  auraRgb?: string;
+  sparkle: boolean;
+  tableRatio: number;
+}
+
+const ORE_VISUAL_STYLES: Record<string, OreVisualStyle> = {
+  copper: {
+    material: 'metal',
+    spec: '#fde68a',
+    light: '#f59e0b',
+    base: '#d97706',
+    shadow: '#9a3412',
+    deep: '#451a03',
+    veinColor: 'rgba(217, 119, 6, 0.42)',
+    sparkle: false,
+    tableRatio: 0.44
+  },
+  iron: {
+    material: 'metal',
+    spec: '#f1f5f9',
+    light: '#cbd5e1',
+    base: '#94a3b8',
+    shadow: '#475569',
+    deep: '#1e293b',
+    veinColor: 'rgba(148, 163, 184, 0.36)',
+    sparkle: false,
+    tableRatio: 0.44
+  },
+  silver: {
+    material: 'precious_metal',
+    spec: '#ffffff',
+    light: '#f1f5f9',
+    base: '#cbd5e1',
+    shadow: '#64748b',
+    deep: '#334155',
+    veinColor: 'rgba(226, 232, 240, 0.42)',
+    sparkle: true,
+    tableRatio: 0.46
+  },
+  gold: {
+    material: 'precious_metal',
+    spec: '#fef9c3',
+    light: '#fde047',
+    base: '#eab308',
+    shadow: '#a16207',
+    deep: '#422006',
+    veinColor: 'rgba(250, 204, 21, 0.46)',
+    auraRgb: '250, 204, 21',
+    sparkle: true,
+    tableRatio: 0.46
+  },
+  emerald: {
+    material: 'gem',
+    spec: '#d1fae5',
+    light: '#34d399',
+    base: '#10b981',
+    shadow: '#047857',
+    deep: '#022c22',
+    veinColor: 'rgba(16, 185, 129, 0.46)',
+    auraRgb: '16, 185, 129',
+    sparkle: true,
+    tableRatio: 0.50
+  },
+  diamond: {
+    material: 'gem',
+    spec: '#ffffff',
+    light: '#bae6fd',
+    base: '#38bdf8',
+    shadow: '#0284c7',
+    deep: '#082f49',
+    veinColor: 'rgba(56, 189, 248, 0.52)',
+    auraRgb: '56, 189, 248',
+    sparkle: true,
+    tableRatio: 0.52
+  },
+  ancient_core: {
+    material: 'relic',
+    spec: '#fdf2f8',
+    light: '#f472b6',
+    base: '#ec4899',
+    shadow: '#9d174d',
+    deep: '#500724',
+    veinColor: 'rgba(236, 72, 153, 0.55)',
+    auraRgb: '236, 72, 153',
+    sparkle: true,
+    tableRatio: 0.48
+  }
+};
+
+/**
+ * Returns the 5-tone material & facet styling palette for a mineral ore ID.
+ */
+export function getOreVisualStyle(oreId: string, fallbackColor: string = '#cbd5e1'): OreVisualStyle {
+  const found = ORE_VISUAL_STYLES[oreId];
+  if (found) return found;
+  return {
+    material: 'metal',
+    spec: '#f8fafc',
+    light: fallbackColor,
+    base: fallbackColor,
+    shadow: '#475569',
+    deep: '#0f172a',
+    veinColor: 'rgba(203, 213, 225, 0.35)',
+    sparkle: false,
+    tableRatio: 0.46
+  };
+}
+
+function fillSocketPolygon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  sides: number,
+  rotation: number
+): void {
+  const step = (Math.PI * 2) / sides;
+  const start = -Math.PI / 2 + rotation;
+  ctx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    const a = start + i * step;
+    const px = cx + radius * Math.cos(a);
+    const py = cy + radius * Math.sin(a);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(6, 9, 15, 0.48)';
+  ctx.fill();
+}
+
+function drawFacetedPolygon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  sides: number,
+  style: OreVisualStyle,
+  rotation: number = 0,
+  isSatellite: boolean = false
+): void {
+  if (sides < 3) return;
+  const step = (Math.PI * 2) / sides;
+  const startAngle = -Math.PI / 2 + rotation;
+  const innerR = radius * style.tableRatio;
+
+  const outerX: number[] = new Array(sides);
+  const outerY: number[] = new Array(sides);
+  const innerX: number[] = new Array(sides);
+  const innerY: number[] = new Array(sides);
+
+  for (let i = 0; i < sides; i++) {
+    const a = startAngle + i * step;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    outerX[i] = cx + radius * ca;
+    outerY[i] = cy + radius * sa;
+    innerX[i] = cx + innerR * ca;
+    innerY[i] = cy + innerR * sa;
+  }
+
+  ctx.save();
+
+  // 1. Directional Low-Poly Outer Bevels (lit from top-left (-0.7071, -0.7071))
+  for (let i = 0; i < sides; i++) {
+    const next = (i + 1) % sides;
+    const midAngle = startAngle + (i + 0.5) * step;
+    const dot = -(Math.cos(midAngle) * 0.7071 + Math.sin(midAngle) * 0.7071);
+
+    if (dot > 0.45) ctx.fillStyle = style.spec;
+    else if (dot > 0.06) ctx.fillStyle = style.light;
+    else if (dot > -0.35) ctx.fillStyle = style.base;
+    else if (dot > -0.72) ctx.fillStyle = style.shadow;
+    else ctx.fillStyle = style.deep;
+
+    ctx.beginPath();
+    ctx.moveTo(outerX[i], outerY[i]);
+    ctx.lineTo(outerX[next], outerY[next]);
+    ctx.lineTo(innerX[next], innerY[next]);
+    ctx.lineTo(innerX[i], innerY[i]);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 2. Inner Crown Table
+  const traceInnerTable = () => {
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+      if (i === 0) ctx.moveTo(innerX[i], innerY[i]);
+      else ctx.lineTo(innerX[i], innerY[i]);
+    }
+    ctx.closePath();
+  };
+
+  traceInnerTable();
+  ctx.fillStyle = style.material === 'gem' ? style.light : style.base;
+  ctx.fill();
+
+  if (!isSatellite) {
+    // Upper-left specular wedge or diagonal metallic sheen clipped inside table
+    ctx.save();
+    traceInnerTable();
+    ctx.clip();
+    if (style.material === 'gem' || style.material === 'relic') {
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = style.spec;
+      ctx.beginPath();
+      ctx.moveTo(cx - innerR, cy - innerR);
+      ctx.lineTo(cx + innerR * 0.55, cy - innerR);
+      ctx.lineTo(cx - innerR, cy + innerR * 0.55);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = style.spec;
+      ctx.beginPath();
+      ctx.moveTo(cx - innerR * 0.95, cy + innerR * 0.10);
+      ctx.lineTo(cx + innerR * 0.10, cy - innerR * 0.95);
+      ctx.lineTo(cx + innerR * 0.55, cy - innerR * 0.50);
+      ctx.lineTo(cx - innerR * 0.50, cy + innerR * 0.55);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Gem internal star refraction spokes
+    if (style.material === 'gem') {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.34)';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      for (let i = 0; i < sides; i++) {
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(innerX[i], innerY[i]);
+      }
+      ctx.stroke();
+    }
+
+    // Crisp facet ridge lines from outer to inner table vertices
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < sides; i++) {
+      const va = startAngle + i * step;
+      const dot = -(Math.cos(va) * 0.7071 + Math.sin(va) * 0.7071);
+      ctx.strokeStyle = dot > 0 ? 'rgba(255, 255, 255, 0.28)' : 'rgba(0, 0, 0, 0.22)';
+      ctx.beginPath();
+      ctx.moveTo(outerX[i], outerY[i]);
+      ctx.lineTo(innerX[i], innerY[i]);
+      ctx.stroke();
+    }
+  }
+
+  // 3. Crisp Deep Contrast Rim
+  ctx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    if (i === 0) ctx.moveTo(outerX[i], outerY[i]);
+    else ctx.lineTo(outerX[i], outerY[i]);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = style.deep;
+  ctx.lineWidth = isSatellite ? 0.9 : 1.25;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // 4. Top-Left Specular Edge Rim Accent
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.lineWidth = isSatellite ? 0.6 : 0.9;
+  for (let i = 0; i < sides; i++) {
+    const next = (i + 1) % sides;
+    const midAngle = startAngle + (i + 0.5) * step;
+    const dot = -(Math.cos(midAngle) * 0.7071 + Math.sin(midAngle) * 0.7071);
+    if (dot > 0.18) {
+      ctx.beginPath();
+      ctx.moveTo(outerX[i], outerY[i]);
+      ctx.lineTo(outerX[next], outerY[next]);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawStarGlint(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  alpha: number,
+  color: string
+): void {
+  if (alpha <= 0.02 || radius <= 0.5) return;
+  const arm = radius;
+  const waist = radius * 0.24;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - arm);
+  ctx.lineTo(x + waist, y - waist);
+  ctx.lineTo(x + arm, y);
+  ctx.lineTo(x + waist, y + waist);
+  ctx.lineTo(x, y + arm);
+  ctx.lineTo(x - waist, y + waist);
+  ctx.lineTo(x - arm, y);
+  ctx.lineTo(x - waist, y - waist);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function renderEmbeddedOreTile(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  x: number,
+  y: number,
+  ore: OreDefinition,
+  now: number
+): void {
+  const style = getOreVisualStyle(ore.id, ore.color);
+  const h1 = tileHash(x, y);
+  const h2 = tileHash(x * 7 + 13, y * 11 + 5);
+  const h3 = tileHash(x * 17 + 3, y * 19 + 7);
+
+  const radius = TILE_SIZE * 0.33;
+  const cx = screenX + TILE_SIZE * 0.5 + (h1 - 0.5) * 2.5;
+  const cy = screenY + TILE_SIZE * 0.5 + (h2 - 0.5) * 2.0;
+  const rot = (h3 - 0.5) * 0.22;
+
+  // 1. Hairline Mineral Veins Radiating into Host Rock
+  const veinCount = h3 > 0.45 ? 3 : 2;
+  ctx.save();
+  ctx.strokeStyle = style.veinColor;
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'round';
+  const baseVeinAngle = h1 * Math.PI * 2;
+  for (let i = 0; i < veinCount; i++) {
+    const va = baseVeinAngle + i * ((Math.PI * 2) / veinCount) + (h2 - 0.5) * 0.5;
+    const midLen = radius * 0.95;
+    const endLen = radius * (1.28 + (i % 2) * 0.22);
+    const mx = Math.max(screenX + 3, Math.min(screenX + TILE_SIZE - 3, cx + Math.cos(va) * midLen));
+    const my = Math.max(screenY + 3, Math.min(screenY + TILE_SIZE - 3, cy + Math.sin(va) * midLen));
+    const ex = Math.max(screenX + 3, Math.min(screenX + TILE_SIZE - 3, cx + Math.cos(va + 0.18) * endLen));
+    const ey = Math.max(screenY + 3, Math.min(screenY + TILE_SIZE - 3, cy + Math.sin(va + 0.18) * endLen));
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(va) * (radius * 0.55), cy + Math.sin(va) * (radius * 0.55));
+    ctx.lineTo(mx, my);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 2. Soft Alpha Aura for Rare Tiers (Zero Canvas shadowBlur overhead)
+  if (style.auraRgb) {
+    const pulse = 0.5 + 0.5 * Math.sin(now * 0.0045 + x * 5 + y * 9);
+    ctx.fillStyle = `rgba(${style.auraRgb}, ${0.10 + pulse * 0.08})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.38, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(${style.auraRgb}, ${0.14 + pulse * 0.10})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.05, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 3. Embedded Dark Socket Shadow Behind Single Crystal
+  fillSocketPolygon(ctx, cx + 1.2, cy + 1.8, radius * 1.07, ore.sides, rot);
+
+  // 4. Single Multi-Faceted Mineral Specimen
+  drawFacetedPolygon(ctx, cx, cy, radius, ore.sides, style, rot, false);
+
+  // 5. Periodic Desynchronized Specular Star Glint (Silver+)
+  if (style.sparkle) {
+    const twinkleWave = Math.sin(now * 0.0032 + h1 * 18 + h2 * 11);
+    const twinkle = twinkleWave > 0 ? Math.pow(twinkleWave, 6) : 0;
+    if (twinkle > 0.12) {
+      const glintAngle = -Math.PI * 0.75 + rot * 0.5;
+      const gx = cx + Math.cos(glintAngle) * (radius * 0.88);
+      const gy = cy + Math.sin(glintAngle) * (radius * 0.88);
+      const glintColor = ore.id === 'gold' ? '#fef9c3' : '#ffffff';
+      drawStarGlint(ctx, gx, gy, 3.2 + twinkle * 2.4, Math.min(0.95, twinkle), glintColor);
+    }
+  }
 }
 
 /**
@@ -520,6 +946,135 @@ function renderSurfaceStations(
   ctx.restore();
 }
 
+function renderTexturedDirtBlock(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  x: number,
+  y: number,
+  biome: ReturnType<typeof getBiomeForDepth>,
+  now: number
+): void {
+  const h = tileHash(x, y);
+  const h2 = tileHash(x * 3 + 7, y * 5 + 11);
+
+  ctx.fillStyle = biome.dirtColor;
+  ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+
+  if (h > 0.62) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+  } else if (h < 0.32) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+    ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+  }
+
+  ctx.strokeStyle = biome.dirtDarkColor;
+  ctx.lineWidth = 0.75;
+  ctx.strokeRect(screenX + 0.5, screenY + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+
+  // Hash-positioned natural mineral speckles
+  ctx.fillStyle = biome.dirtDarkColor;
+  ctx.fillRect(screenX + 6 + Math.floor(h * 12), screenY + 8 + Math.floor(h2 * 10), 4, 3);
+  ctx.fillRect(screenX + 20 + Math.floor(h2 * 12), screenY + 25 + Math.floor(h * 10), 5, 3);
+
+  // Biome geological flavor
+  if (biome.id === 'quartz' && h > 0.45) {
+    ctx.fillStyle = 'rgba(192, 132, 252, 0.32)';
+    ctx.fillRect(screenX + TILE_SIZE - 10, screenY + 6, 3, 5);
+    ctx.fillRect(screenX + 7, screenY + TILE_SIZE - 9, 4, 3);
+  } else if (biome.id === 'basalt') {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.fillRect(screenX + 3, screenY + Math.floor(TILE_SIZE * (0.35 + h * 0.3)), TILE_SIZE - 6, 2);
+  } else if (biome.id === 'magma' && h > 0.35) {
+    const glow = 0.20 + 0.16 * Math.sin(now * 0.005 + x * 2 + y);
+    ctx.strokeStyle = `rgba(249, 115, 22, ${glow})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(screenX + 6, screenY + TILE_SIZE - 8);
+    ctx.lineTo(screenX + TILE_SIZE * 0.6, screenY + TILE_SIZE * 0.55);
+    ctx.stroke();
+  }
+}
+
+function renderTunnelEdgeBevels(
+  ctx: CanvasRenderingContext2D,
+  world: Tile[][],
+  x: number,
+  y: number,
+  screenX: number,
+  screenY: number,
+  biomeHighlight: string
+): void {
+  if (y > SURFACE_ROW && isRevealedOpen(world, x, y - 1)) {
+    ctx.fillStyle = biomeHighlight;
+    ctx.fillRect(screenX, screenY, TILE_SIZE, 3);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.fillRect(screenX, screenY, TILE_SIZE, 1);
+  }
+  if (isRevealedOpen(world, x, y + 1)) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(screenX, screenY + TILE_SIZE - 4, TILE_SIZE, 4);
+  }
+  if (isRevealedOpen(world, x - 1, y)) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(screenX, screenY, 2.5, TILE_SIZE);
+  }
+  if (isRevealedOpen(world, x + 1, y)) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+    ctx.fillRect(screenX + TILE_SIZE - 3, screenY, 3, TILE_SIZE);
+  }
+}
+
+function renderUnifiedSurfacePads(
+  ctx: CanvasRenderingContext2D,
+  surfaceScreenY: number,
+  viewportHeight: number,
+  now: number
+): void {
+  if (surfaceScreenY < -TILE_SIZE || surfaceScreenY > viewportHeight + TILE_SIZE) return;
+
+  // Layered turf rim only across natural dirt between pads
+  const turfStartX = 3 * TILE_SIZE;
+  const turfWidth = Math.max(0, (GRID_WIDTH - 6) * TILE_SIZE);
+  if (turfWidth > 0) {
+    ctx.fillStyle = '#22c55e';
+    ctx.fillRect(turfStartX, surfaceScreenY - 2, turfWidth, 4);
+    ctx.fillStyle = '#4ade80';
+    ctx.fillRect(turfStartX, surfaceScreenY - 2, turfWidth, 1.5);
+  }
+
+  const drawPadOverlay = (padStartCol: number, label: string, accentColor: string) => {
+    const padX = padStartCol * TILE_SIZE;
+    const centerTileX = (padStartCol + 1) * TILE_SIZE;
+
+    // Centered nameplate across the 3-tile platform
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(centerTileX - 7, surfaceScreenY + 15, TILE_SIZE + 14, 16);
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(centerTileX - 7, surfaceScreenY + 15, TILE_SIZE + 14, 16);
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, centerTileX + TILE_SIZE / 2, surfaceScreenY + 23);
+
+    // Sequential animated landing guide LEDs
+    const activeLed = Math.floor(now / 280) % 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i === activeLed ? accentColor : '#334155';
+      ctx.beginPath();
+      ctx.arc(padX + (i + 0.5) * TILE_SIZE, surfaceScreenY + TILE_SIZE - 7, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  drawPadOverlay(0, 'İKMAL', '#38bdf8');
+  drawPadOverlay(GRID_WIDTH - 3, 'ATÖLYE', '#4ade80');
+}
+
 /**
  * Renders the world grid with Fog of War (revealed tiles) and depth indicators.
  */
@@ -558,20 +1113,23 @@ export function renderWorld(
       const tile = row[x];
       const screenX = x * TILE_SIZE;
 
-      // FOG OF WAR (Subterranean Unrevealed Layer with Biome Tint)
+      // FOG OF WAR (Subterranean Unrevealed Layer with Soft Edge Feathering)
       if (y > SURFACE_ROW && !tile.revealed) {
-        // Mysterious unexplored dense earth / bedrock tinted by geological biome
         ctx.fillStyle = biome.fogColor;
         ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+        const nearTop = y === SURFACE_ROW + 1 || isRevealedNeighbor(world, x, y - 1);
+        const nearBottom = isRevealedNeighbor(world, x, y + 1);
+        const nearLeft = isRevealedNeighbor(world, x - 1, y);
+        const nearRight = isRevealedNeighbor(world, x + 1, y);
 
-        // Subtle dark grain pattern
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-        ctx.fillRect(screenX + 10, screenY + 12, 3, 3);
-        ctx.fillRect(screenX + 30, screenY + 28, 3, 3);
+        if (nearTop || nearBottom || nearLeft || nearRight) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.045)';
+          if (nearTop) ctx.fillRect(screenX, screenY, TILE_SIZE, 5);
+          if (nearBottom) ctx.fillRect(screenX, screenY + TILE_SIZE - 5, TILE_SIZE, 5);
+          if (nearLeft) ctx.fillRect(screenX, screenY, 5, TILE_SIZE);
+          if (nearRight) ctx.fillRect(screenX + TILE_SIZE - 5, screenY, 5, TILE_SIZE);
+        }
         continue; // Never draw ores or rocks on unrevealed tiles!
       }
 
@@ -579,11 +1137,16 @@ export function renderWorld(
       switch (tile.type) {
         case TileType.EMPTY:
           if (y >= SURFACE_ROW) {
-            ctx.fillStyle = '#121217';
+            ctx.fillStyle = '#0f1016';
             ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-            ctx.strokeStyle = '#1b1b22';
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.06)';
             ctx.lineWidth = 0.5;
             ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+
+            // Subtle subterranean backwall strata
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
+            ctx.fillRect(screenX + 4, screenY + 10, TILE_SIZE - 8, 2);
+            ctx.fillRect(screenX + 10, screenY + TILE_SIZE * 0.65, TILE_SIZE - 20, 2);
 
             // Industrial Steel Elevator Shaft & Glowing Cyan Power Line
             if (tile.hasElevator) {
@@ -638,32 +1201,30 @@ export function renderWorld(
           break;
 
         case TileType.DIRT: {
-          ctx.fillStyle = biome.dirtColor;
-          ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
-          ctx.strokeStyle = biome.dirtDarkColor;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(screenX + 0.5, screenY + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
-
-          // Subtle natural mineral speckles
-          ctx.fillStyle = biome.dirtDarkColor;
-          ctx.fillRect(screenX + 8, screenY + 10, 4, 3);
-          ctx.fillRect(screenX + 28, screenY + 26, 4, 3);
+          renderTexturedDirtBlock(ctx, screenX, screenY, x, y, biome, now);
           break;
         }
 
         case TileType.ROCK: {
-          ctx.fillStyle = '#334155';
+          const rockHash = tileHash(x, y);
+          ctx.fillStyle = rockHash > 0.5 ? '#354357' : '#2e3b4e';
           ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
 
-          ctx.strokeStyle = '#475569';
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(screenX + 2, screenY + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+          ctx.strokeStyle = '#4b5b73';
+          ctx.lineWidth = 1.4;
+          ctx.strokeRect(screenX + 1.5, screenY + 1.5, TILE_SIZE - 3, TILE_SIZE - 3);
 
           ctx.strokeStyle = '#1e293b';
           ctx.beginPath();
-          ctx.moveTo(screenX + 4, screenY + 4);
-          ctx.lineTo(screenX + TILE_SIZE - 4, screenY + TILE_SIZE - 4);
+          if (rockHash > 0.35) {
+            ctx.moveTo(screenX + 5, screenY + 5);
+            ctx.lineTo(screenX + TILE_SIZE - 5, screenY + TILE_SIZE - 5);
+          } else {
+            ctx.moveTo(screenX + TILE_SIZE - 6, screenY + 6);
+            ctx.lineTo(screenX + 10, screenY + TILE_SIZE - 8);
+          }
+          ctx.moveTo(screenX + TILE_SIZE * 0.5, screenY + TILE_SIZE * 0.5);
+          ctx.lineTo(screenX + TILE_SIZE - 6, screenY + TILE_SIZE * 0.35);
           ctx.stroke();
 
           // Chisel indicator based on real biome-tier drill rule
@@ -738,89 +1299,38 @@ export function renderWorld(
         }
 
         case TileType.FUEL_PAD: {
-          ctx.fillStyle = '#0369a1';
+          ctx.fillStyle = '#1e293b';
           ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
+          ctx.fillStyle = '#0284c7';
+          ctx.fillRect(screenX, screenY, TILE_SIZE, 4);
+          ctx.fillStyle = '#0c4a6e';
+          ctx.fillRect(screenX, screenY + 4, TILE_SIZE, 5);
           ctx.fillStyle = '#38bdf8';
-          ctx.fillRect(screenX, screenY, TILE_SIZE, 6);
-
-          ctx.fillStyle = '#f0f9ff';
-          ctx.font = 'bold 11px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('FUEL', screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+          for (let k = 0; k < 3; k++) {
+            ctx.fillRect(screenX + k * 16 + 2, screenY + 5, 6, 3);
+          }
           break;
         }
 
         case TileType.SHOP_PAD: {
-          ctx.fillStyle = '#15803d';
+          ctx.fillStyle = '#1e293b';
           ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
+          ctx.fillStyle = '#16a34a';
+          ctx.fillRect(screenX, screenY, TILE_SIZE, 4);
+          ctx.fillStyle = '#14532d';
+          ctx.fillRect(screenX, screenY + 4, TILE_SIZE, 5);
           ctx.fillStyle = '#4ade80';
-          ctx.fillRect(screenX, screenY, TILE_SIZE, 6);
-
-          ctx.fillStyle = '#f0fdf4';
-          ctx.font = 'bold 11px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('SHOP', screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+          for (let k = 0; k < 3; k++) {
+            ctx.fillRect(screenX + k * 16 + 2, screenY + 5, 6, 3);
+          }
           break;
         }
 
         case TileType.ORE: {
-          ctx.fillStyle = biome.dirtColor;
-          ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
-          ctx.strokeStyle = biome.dirtDarkColor;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(screenX + 0.5, screenY + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+          renderTexturedDirtBlock(ctx, screenX, screenY, x, y, biome, now);
 
           if (tile.ore) {
-            const cx = screenX + TILE_SIZE / 2;
-            const cy = screenY + TILE_SIZE / 2;
-            const radius = TILE_SIZE * 0.33;
-
-            // Rare Mineral Pulse for sides >= 6 (Gold, Emerald, Diamond)
-            if (tile.ore.sides >= 6) {
-              ctx.save();
-              const pulse = 0.5 + 0.5 * Math.sin(now * 0.005 + (x * 7 + y * 11));
-              ctx.shadowColor = tile.ore.color;
-              ctx.shadowBlur = 6 + pulse * 10;
-
-              drawPolygon(
-                ctx,
-                cx,
-                cy,
-                radius,
-                tile.ore.sides,
-                tile.ore.color,
-                'rgba(255, 255, 255, 0.9)'
-              );
-
-              // Counter-rotating inner micro-polygon core
-              drawPolygon(
-                ctx,
-                cx,
-                cy,
-                radius * 0.42,
-                tile.ore.sides,
-                '#ffffff',
-                tile.ore.color,
-                -now * 0.002
-              );
-
-              ctx.restore();
-            } else {
-              drawPolygon(
-                ctx,
-                cx,
-                cy,
-                radius,
-                tile.ore.sides,
-                tile.ore.color,
-                'rgba(255, 255, 255, 0.6)'
-              );
-            }
+            renderEmbeddedOreTile(ctx, screenX, screenY, x, y, tile.ore, now);
           }
           break;
         }
@@ -834,38 +1344,125 @@ export function renderWorld(
           ctx.lineWidth = 1.8;
           ctx.strokeRect(screenX + 0.5, screenY + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
 
+          // Etched geometric corner brackets & faint altar ring
+          ctx.strokeStyle = 'rgba(244, 63, 94, 0.55)';
+          ctx.lineWidth = 1.2;
+          const br = 7;
+          ctx.beginPath();
+          ctx.moveTo(screenX + 4, screenY + 4 + br);
+          ctx.lineTo(screenX + 4, screenY + 4);
+          ctx.lineTo(screenX + 4 + br, screenY + 4);
+          ctx.moveTo(screenX + TILE_SIZE - 4 - br, screenY + 4);
+          ctx.lineTo(screenX + TILE_SIZE - 4, screenY + 4);
+          ctx.lineTo(screenX + TILE_SIZE - 4, screenY + 4 + br);
+          ctx.moveTo(screenX + 4, screenY + TILE_SIZE - 4 - br);
+          ctx.lineTo(screenX + 4, screenY + TILE_SIZE - 4);
+          ctx.lineTo(screenX + 4 + br, screenY + TILE_SIZE - 4);
+          ctx.moveTo(screenX + TILE_SIZE - 4 - br, screenY + TILE_SIZE - 4);
+          ctx.lineTo(screenX + TILE_SIZE - 4, screenY + TILE_SIZE - 4);
+          ctx.lineTo(screenX + TILE_SIZE - 4, screenY + TILE_SIZE - 4 - br);
+          ctx.stroke();
+
           const cx = screenX + TILE_SIZE / 2;
           const cy = screenY + TILE_SIZE / 2;
           const pulse = 0.5 + 0.5 * Math.sin(now * 0.006);
           const coreHue = Math.floor((now * 0.07) % 360);
 
+          ctx.strokeStyle = 'rgba(236, 72, 153, 0.28)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(cx, cy, TILE_SIZE * 0.40, 0, Math.PI * 2);
+          ctx.stroke();
+
           ctx.save();
-          // Dynamic chromatic rainbow halo
+          // Dynamic chromatic rainbow halo (single entity on map)
           ctx.shadowColor = `hsl(${coreHue}, 95%, 65%)`;
           ctx.shadowBlur = 12 + pulse * 14;
 
-          // Main 12-Gon (Dodecagon) Body
-          drawPolygon(
-            ctx,
-            cx,
-            cy,
-            TILE_SIZE * 0.42,
-            12,
-            `hsl(${coreHue}, 85%, 55%)`,
-            '#ffffff',
-            now * 0.001
-          );
+          // Faceted 12-Gon Chromatic Outer Crown
+          const outerR = TILE_SIZE * 0.41;
+          const innerR = outerR * 0.48;
+          const rot = now * 0.001;
+          const step = (Math.PI * 2) / 12;
+          const ox: number[] = [];
+          const oy: number[] = [];
+          const ix: number[] = [];
+          const iy: number[] = [];
 
-          // Counter-rotating sacred inner crystal core
-          drawPolygon(
+          for (let i = 0; i < 12; i++) {
+            const a = -Math.PI / 2 + rot + i * step;
+            ox.push(cx + outerR * Math.cos(a));
+            oy.push(cy + outerR * Math.sin(a));
+            ix.push(cx + innerR * Math.cos(a));
+            iy.push(cy + innerR * Math.sin(a));
+          }
+
+          for (let i = 0; i < 12; i++) {
+            const next = (i + 1) % 12;
+            const midA = -Math.PI / 2 + rot + (i + 0.5) * step;
+            const dot = -(Math.cos(midA) * 0.7071 + Math.sin(midA) * 0.7071);
+            const hue = (coreHue + i * 18) % 360;
+            const light = dot > 0.35 ? 74 : dot > -0.15 ? 58 : 38;
+            ctx.fillStyle = `hsl(${hue}, 90%, ${light}%)`;
+            ctx.beginPath();
+            ctx.moveTo(ox[i], oy[i]);
+            ctx.lineTo(ox[next], oy[next]);
+            ctx.lineTo(ix[next], iy[next]);
+            ctx.lineTo(ix[i], iy[i]);
+            ctx.closePath();
+            ctx.fill();
+          }
+
+          // Inner Chromatic Table
+          ctx.beginPath();
+          for (let i = 0; i < 12; i++) {
+            if (i === 0) ctx.moveTo(ix[i], iy[i]);
+            else ctx.lineTo(ix[i], iy[i]);
+          }
+          ctx.closePath();
+          ctx.fillStyle = `hsl(${coreHue}, 85%, 65%)`;
+          ctx.fill();
+
+          // Dark Contrast Rim + Top-Left Specular Rim
+          ctx.beginPath();
+          for (let i = 0; i < 12; i++) {
+            if (i === 0) ctx.moveTo(ox[i], oy[i]);
+            else ctx.lineTo(ox[i], oy[i]);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = '#500724';
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
+
+          ctx.strokeStyle = '#fdf2f8';
+          ctx.lineWidth = 1.0;
+          for (let i = 0; i < 12; i++) {
+            const next = (i + 1) % 12;
+            const midA = -Math.PI / 2 + rot + (i + 0.5) * step;
+            const dot = -(Math.cos(midA) * 0.7071 + Math.sin(midA) * 0.7071);
+            if (dot > 0.25) {
+              ctx.beginPath();
+              ctx.moveTo(ox[i], oy[i]);
+              ctx.lineTo(ox[next], oy[next]);
+              ctx.stroke();
+            }
+          }
+
+          ctx.shadowBlur = 0;
+
+          // Counter-rotating sacred faceted inner crystal core
+          const relicStyle = getOreVisualStyle('ancient_core');
+          drawFacetedPolygon(ctx, cx, cy, TILE_SIZE * 0.19, 12, relicStyle, -now * 0.003, true);
+
+          // Pulsing 4-point specular glint on crown
+          const glintAngle = -Math.PI * 0.75 + rot * 0.4;
+          drawStarGlint(
             ctx,
-            cx,
-            cy,
-            TILE_SIZE * 0.20,
-            12,
-            '#ffffff',
-            '#ec4899',
-            -now * 0.003
+            cx + Math.cos(glintAngle) * (outerR * 0.85),
+            cy + Math.sin(glintAngle) * (outerR * 0.85),
+            4.5 + pulse * 2.0,
+            0.75 + pulse * 0.25,
+            '#ffffff'
           );
 
           ctx.restore();
@@ -874,8 +1471,7 @@ export function renderWorld(
 
         case TileType.CHEST: {
           // Abandoned Miner's Supply Crate / Chest
-          ctx.fillStyle = biome.dirtColor;
-          ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+          renderTexturedDirtBlock(ctx, screenX, screenY, x, y, biome, now);
 
           const pad = 6;
           const cw = TILE_SIZE - pad * 2;
@@ -907,6 +1503,17 @@ export function renderWorld(
           ctx.strokeRect(cx - 2, cy - 2, cw + 4, ch + 4);
           break;
         }
+      }
+
+      // Autotiling edge bevels & ambient shadows against open subterranean tunnels
+      if (
+        y >= SURFACE_ROW &&
+        tile.type !== TileType.EMPTY &&
+        tile.type !== TileType.FUEL_PAD &&
+        tile.type !== TileType.SHOP_PAD &&
+        tile.type !== TileType.ANCIENT_CORE
+      ) {
+        renderTunnelEdgeBevels(ctx, world, x, y, screenX, screenY, getBiomeHighlightColor(biome.id));
       }
 
       // Render Rare Archaeological Relic / Fossil glyph if present in revealed tile
@@ -1012,15 +1619,8 @@ export function renderWorld(
     }
   }
 
-  // Surface Ground Horizon Line
-  if (surfaceScreenY >= 0 && surfaceScreenY <= viewportHeight) {
-    ctx.strokeStyle = '#4ade80';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, surfaceScreenY);
-    ctx.lineTo(viewportWidth, surfaceScreenY);
-    ctx.stroke();
-  }
+  // Surface Landing Platforms (İKMAL / ATÖLYE) & Layered Horizon Rim
+  renderUnifiedSurfacePads(ctx, surfaceScreenY, viewportHeight, now);
 
   // 4. Subterranean Ambient Biome Motes
   if (surfaceScreenY < viewportHeight) {
@@ -1104,6 +1704,32 @@ export function renderMiniRadar(
       cCtx.moveTo(0, SURFACE_ROW * scaleY);
       cCtx.lineTo(cacheW, SURFACE_ROW * scaleY);
       cCtx.stroke();
+
+      // Subtle Geological Biome Zones & Depth Dividers (Quartz 116m, Basalt 256m, Magma 406m)
+      const biomeBands = [
+        { startRow: 61, endRow: 131, label: '116', line: 'rgba(192, 132, 252, 0.32)', tint: 'rgba(45, 38, 64, 0.28)' },
+        { startRow: 131, endRow: 206, label: '256', line: 'rgba(163, 230, 53, 0.30)', tint: 'rgba(44, 53, 49, 0.28)' },
+        { startRow: 206, endRow: GRID_HEIGHT, label: '406', line: 'rgba(249, 115, 22, 0.34)', tint: 'rgba(61, 24, 24, 0.30)' }
+      ];
+      for (const band of biomeBands) {
+        const by = band.startRow * scaleY;
+        const bh = Math.max(1, (band.endRow - band.startRow) * scaleY);
+        cCtx.fillStyle = band.tint;
+        cCtx.fillRect(0, by, cacheW, bh);
+
+        cCtx.strokeStyle = band.line;
+        cCtx.lineWidth = 0.7;
+        cCtx.beginPath();
+        cCtx.moveTo(0, by);
+        cCtx.lineTo(cacheW, by);
+        cCtx.stroke();
+
+        cCtx.fillStyle = band.line;
+        cCtx.font = '6px monospace';
+        cCtx.textAlign = 'right';
+        cCtx.textBaseline = 'top';
+        cCtx.fillText(band.label, cacheW - 1, by + 1);
+      }
 
       // Static discovered tiles & tunnels
       const tileH = Math.max(1, scaleY);
@@ -1272,6 +1898,10 @@ interface MiningRigRenderParams {
   drillTier: number;
   color: string;
   hullRatio?: number;
+  hullLevel?: number;
+  engineLevel?: number;
+  radarLevel?: number;
+  cargoRatio?: number;
   isStruggling?: boolean;
   isOverdrive?: boolean;
   drillBarColorOverride?: string;
@@ -1291,6 +1921,10 @@ function renderMiningRig(
   const palette = getDrillPalette(rig.drillTier || 1);
   const customColor = rig.color || '#00f2fe';
   const hullRatio = rig.hullRatio ?? 1.0;
+  const hullLevel = rig.hullLevel ?? 1;
+  const engineLevel = rig.engineLevel ?? 1;
+  const radarLevel = rig.radarLevel ?? 1;
+  const cargoRatio = rig.cargoRatio;
   const isStruggling = !!rig.isStruggling;
   const isOverdrive = !!rig.isOverdrive;
 
@@ -1369,13 +2003,15 @@ function renderMiningRig(
     ctx.restore();
   }
 
-  // 1. Dual VTOL Rocket Lift Exhaust Flames (When Flying Upward)
+  // 1. Dual VTOL Rocket Lift Exhaust Flames (Scale & shift to plasma cyan at engine Lv.3+)
   if (rig.isThrusting) {
-    const flameHeight = 14 + Math.random() * 9;
+    const flameHeight = 14 + (engineLevel - 1) * 2.5 + Math.random() * 9;
+    const isPlasma = engineLevel >= 3;
+    const isCorePlasma = engineLevel >= 5;
     const thrusterPositions = [screenX + 6, screenX + PLAYER_WIDTH - 14];
 
     for (const tx of thrusterPositions) {
-      ctx.fillStyle = '#06b6d4';
+      ctx.fillStyle = isCorePlasma ? '#22d3ee' : isPlasma ? '#38bdf8' : '#06b6d4';
       ctx.beginPath();
       ctx.moveTo(tx, screenY + PLAYER_HEIGHT - 2);
       ctx.lineTo(tx + 4, screenY + PLAYER_HEIGHT + flameHeight);
@@ -1383,7 +2019,7 @@ function renderMiningRig(
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = '#f97316';
+      ctx.fillStyle = isPlasma ? '#bae6fd' : '#f97316';
       ctx.beginPath();
       ctx.moveTo(tx + 1.5, screenY + PLAYER_HEIGHT - 2);
       ctx.lineTo(tx + 4, screenY + PLAYER_HEIGHT + flameHeight * 0.7);
@@ -1391,7 +2027,7 @@ function renderMiningRig(
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = '#fef08a';
+      ctx.fillStyle = isPlasma ? '#ffffff' : '#fef08a';
       ctx.beginPath();
       ctx.moveTo(tx + 2.5, screenY + PLAYER_HEIGHT - 2);
       ctx.lineTo(tx + 4, screenY + PLAYER_HEIGHT + flameHeight * 0.4);
@@ -1416,18 +2052,24 @@ function renderMiningRig(
   }
   ctx.rotate(rotation);
 
-  // Rear Engine Nozzle & Directional Vector Boost
-  ctx.fillStyle = '#1A1A1A';
-  ctx.fillRect(-6, -16, 12, 4);
+  // Rear Engine Nozzle (wider & lit core at higher engine levels) & Directional Vector Boost
+  const nozzleW = 12 + (engineLevel - 1) * 1.5;
+  ctx.fillStyle = engineLevel >= 4 ? '#334155' : '#1A1A1A';
+  ctx.fillRect(-nozzleW / 2, -16, nozzleW, 4);
+  if (engineLevel >= 3) {
+    ctx.fillStyle = engineLevel >= 5 ? '#38bdf8' : '#f59e0b';
+    ctx.fillRect(-nozzleW / 2 + 2, -15, nozzleW - 4, 2);
+  }
 
   if (rig.isThrusting) {
     const flicker = Math.sin(gameTime * 0.05) * 3;
+    const isPlasma = engineLevel >= 3;
     ctx.beginPath();
     ctx.moveTo(-6, -15);
-    ctx.lineTo(0, -25 - flicker);
+    ctx.lineTo(0, -25 - flicker - (engineLevel - 1) * 1.5);
     ctx.lineTo(6, -15);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255, 69, 0, 0.85)';
+    ctx.fillStyle = isPlasma ? 'rgba(56, 189, 248, 0.88)' : 'rgba(255, 69, 0, 0.85)';
     ctx.fill();
 
     ctx.beginPath();
@@ -1435,8 +2077,34 @@ function renderMiningRig(
     ctx.lineTo(0, -20 - flicker * 0.6);
     ctx.lineTo(3, -15);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.95)';
+    ctx.fillStyle = isPlasma ? 'rgba(224, 242, 254, 0.96)' : 'rgba(255, 215, 0, 0.95)';
     ctx.fill();
+  }
+
+  // Roof Radar Antenna (Lv.3+ & active pulse arc at Lv.4-5)
+  if (radarLevel >= 3) {
+    ctx.save();
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-7, -12);
+    ctx.lineTo(-10, -21);
+    ctx.stroke();
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath();
+    ctx.arc(-10, -21, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (radarLevel >= 4) {
+      const radarPulse = 0.5 + 0.5 * Math.sin(gameTime * 0.008);
+      ctx.strokeStyle = `rgba(56, 189, 248, ${0.25 + radarPulse * 0.4})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(-10, -21, 4 + radarPulse * 4, Math.PI * 1.1, Math.PI * 1.9);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // Alarm & Damage state check (hull < 25%)
@@ -1463,6 +2131,22 @@ function renderMiningRig(
     ctx.stroke();
   }
 
+  // Bolted Side Armor Plates & Shoulder Bumper (Hull Lv.2+)
+  if (hullLevel >= 2) {
+    const plateW = hullLevel >= 4 ? 5 : 3.5;
+    ctx.fillStyle = hullLevel >= 4 ? '#64748b' : '#475569';
+    ctx.strokeStyle = hullLevel >= 5 ? '#facc15' : '#94a3b8';
+    ctx.lineWidth = 1;
+    ctx.fillRect(-16 - (plateW - 3), -10, plateW, 14);
+    ctx.strokeRect(-16 - (plateW - 3), -10, plateW, 14);
+    ctx.fillRect(13, -10, plateW, 14);
+    ctx.strokeRect(13, -10, plateW, 14);
+    if (hullLevel >= 3) {
+      ctx.fillStyle = hullLevel >= 5 ? '#facc15' : '#94a3b8';
+      ctx.fillRect(-13, -13, 26, 2);
+    }
+  }
+
   // Main Armored Tank Chassis
   ctx.fillStyle = '#3E4A59';
   ctx.strokeStyle = rig.isDrilling ? '#f59e0b' : '#1F2937';
@@ -1482,6 +2166,22 @@ function renderMiningRig(
   // Chassis Custom Color Plate
   ctx.fillStyle = customColor;
   ctx.fillRect(-10, -2, 20, 3);
+
+  // Cargo Fill LEDs (3 miniature indicators below chassis plate)
+  if (cargoRatio !== undefined) {
+    const clampedRatio = Math.max(0, Math.min(1, cargoRatio));
+    const litCount = clampedRatio <= 0.05 ? 0 : clampedRatio < 0.45 ? 1 : clampedRatio < 0.8 ? 2 : 3;
+    const cargoLedColor =
+      clampedRatio >= 0.9
+        ? (Math.floor(gameTime / 180) % 2 === 0 ? '#ef4444' : '#7f1d1d')
+        : clampedRatio >= 0.6
+          ? '#facc15'
+          : '#22c55e';
+    [-4, 0, 4].forEach((lx, idx) => {
+      ctx.fillStyle = idx < litCount ? cargoLedColor : '#1e293b';
+      ctx.fillRect(lx - 1.2, 5.5, 2.4, 2.4);
+    });
+  }
 
   // Chassis Armor Plating & Grooves
   ctx.strokeStyle = '#2d3748';
@@ -1647,6 +2347,10 @@ export function renderPlayer(
       drillTier: player.upgrades.drill || 1,
       color: player.color || '#00f2fe',
       hullRatio: player.hull / player.maxHull,
+      hullLevel: player.upgrades.hull || 1,
+      engineLevel: player.upgrades.engine || 1,
+      radarLevel: player.upgrades.radar || 1,
+      cargoRatio: player.maxCargo > 0 ? player.cargo.length / player.maxCargo : 0,
       isStruggling: player.isStruggling,
       isOverdrive
     },
