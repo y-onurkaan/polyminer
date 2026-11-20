@@ -7,6 +7,10 @@ import {
   BIOMES,
   RELIC_DEFINITIONS,
   MUSEUM_CURATOR_REWARD,
+  GAS_POCKET_BASE_DAMAGE,
+  GAS_POCKET_HEAT_SPIKE,
+  MAGMA_ROCK_BASE_DAMAGE,
+  MAGMA_ROCK_HEAT_SPIKE,
   UPGRADES,
   UpgradeConfig,
   UpgradeKey,
@@ -1193,7 +1197,7 @@ export class UIManager {
               <div class="relic-icon" style="display:flex; align-items:center; justify-content:center;">${UI_ICONS.lock}</div>
               <div class="relic-info">
                 <div style="font-weight:bold; color:#64748b; font-size:10.5px;">Gizli Kalıntı (${relic.minDepth}m - ${relic.maxDepth}m)</div>
-                <div style="color:#475569; font-size:9.5px;">Kazı esnasında keşfedilmeyi bekliyor.</div>
+                <div style="color:#475569; font-size:9.5px;">Haritada gömülü; Radar Sv.3+ yaklaşınca sis altından parıltı verir.</div>
               </div>
               <div style="font-size:9px; color:#64748b;">???</div>
             </div>
@@ -1296,18 +1300,20 @@ export class UIManager {
         </div>
         <div>🛠️ <strong>Hibrit Geliştirme (Nakit + Ham Cevher):</strong>
           <br/>• Seviye 2: Nakit + 2x Demir | Seviye 3: Nakit + 3x Gümüş
-          <br/>• Seviye 4: Nakit + 3x Altın | Seviye 5: Nakit + 3x Zümrüt & 1x Elmas
+          <br/>• Seviye 4: Nakit + 3x Altın | Seviye 5: Nakit + Modüle göre Altın / Zümrüt / Elmas karışımı
+          <br/>• <strong>Biyom Ayrımı:</strong> Bakır, Demir ve Gümüş 3. ve 4. katmanda çıkmaz; derin damar ve elmas jeodları ağırlıklı olarak kanatlardadır!
           <br/>• Geliştirme yapıldığında kargodaki madenler eritilerek tüketilir. Mağazada <em>[🛡️ Üretim Haricini Sat]</em> ile gerekenleri koruyabilirsiniz.
         </div>
-        <div>🌡️ <strong>Aktif Hararet (%0 - %100):</strong> Kazı yapmak ve roket yakmak motoru ısıtır.
+        <div>🌡️ <strong>Aktif Hararet (%0 - %100):</strong> Kazı, roket, 4. katman ortam ısısı ve yakın Magma taşları motoru ısıtır.
           <br/>• <strong>Termal Overdrive (%75-%99):</strong> Matkap alev alır ve <strong>+%25 ekstra hız bonusu</strong> kazanır!
           <br/>• <strong>Hararet Kilidi (%100):</strong> Motor 2.5 saniye kilitlenir, 15 gövde hasarı verir ve zorunlu soğumaya geçer.
-          <br/>• <strong>Soğutma:</strong> Kazı/roketi durdurunca radyatörünüz motoru soğutur. Ray/asansörde soğuma 1.6 kat daha hızlıdır. <strong>[T] Tamir Kiti</strong> veya yüzey istasyonu harareti anında sıfırlar.
+          <br/>• <strong>Soğutma:</strong> Kazı/roketi durdurunca radyatör motoru soğutur; Magma Çekirdeği'nde Yüksek Seviye Radyatör hayati önem taşır. <strong>[T] Tamir Kiti</strong> veya yüzey istasyonu harareti sıfırlar.
         </div>
-        <div>⛽ <strong>İkmal & Operasyonel Giderler:</strong> Yüzeyde yakıt $1.00/L, gövde tamiri $1.20/HP'dir. Yeraltında dururken saniyede 0.35 L/s baz rölanti yakıtı harcanır.</div>
-        <div>🧪 <strong>Sıkışmış Gaz (Gas Pocket):</strong> Kazılınca patlar (-20 Gövde).</div>
-        <div>🌋 <strong>Magma Taşı (Magma Rock):</strong> -25 Gövde hasarı verir ama $250-$600 arası Termal Kristal bonusu kazandırır!</div>
-        <div>👑 <strong>550m Kadim Çekirdek (Ancient Core):</strong> Haritanın en dibindeki 12-Gen kutsal çekirdek (+$50,000 & Zafer Ekranı!).</div>
+        <div>⛽ <strong>İkmal & Asansör Sınırı:</strong> Yüzeyde yakıt $1.00/L, tamir $1.20/HP'dir. <strong>[C] Asansör Rayı</strong> 1-3. katmanda serbesttir, ancak 4. Katman Magma Çekirdeği'nde (406m+) aşırı ısıdan eridiği için kurulamaz.</div>
+        <div>🧪 <strong>Sıkışmış Gaz (Gas Pocket):</strong> Kazılınca patlar (-${GAS_POCKET_BASE_DAMAGE} Gövde &amp; +${GAS_POCKET_HEAT_SPIKE} Hararet).</div>
+        <div>🌋 <strong>Magma Taşı (Magma Rock):</strong> -${MAGMA_ROCK_BASE_DAMAGE} Gövde hasarı ve +${MAGMA_ROCK_HEAT_SPIKE} Hararet sıçraması verir; yakınında durmak motoru ısıtır. Elmas jeodlarını ve çekirdek kapısını korur.</div>
+        <div>🏛️ <strong>Kadim Fosiller &amp; Müze:</strong> Fosiller dünya haritasında kanatlara önceden gömülüdür (rastgele düşmez). Radar Sv.3+ yakındaki gömülü fosilleri sis altından hafif parıltıyla işaretler; 6/6 tamamlayınca +$${MUSEUM_CURATOR_REWARD.toLocaleString()} küratör ödülü açılır.</div>
+        <div>👑 <strong>Kadim Çekirdek &amp; Zırhlı Oda:</strong> Eksen dışı bir kanatta, kırılmaz <strong>Temel Kaya (Bedrock)</strong> ile mühürlüdür ve dinamite bağışıktır! İçe bakan yan duvardaki 2 blokluk Magma kapısından girilir; Radar Sv.4-5 derinlikte sismik yön sinyali verir (+$50,000 &amp; Zafer!).</div>
         <div>💾 <strong>Otomatik Kayıt:</strong> İlerlemeniz her 5 saniyede bir ve mağazadan çıkıldığında otomatik kaydedilir.</div>
       </div>
     `;

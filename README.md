@@ -15,21 +15,22 @@ Madenler düzgün çokgen olarak çizilir. **Kenar sayısı arttıkça değeri a
 | Bakır | Üçgen | 30 | 3 |
 | Demir | Kare | 55 | 22 |
 | Gümüş | Beşgen | 110 | 65 |
-| Altın | Altıgen | 240 | 130 |
-| Zümrüt | Yedigen | 520 | 185 |
-| Elmas | Sekizgen | 1350 | 225 |
+| Altın | Altıgen | 200 | 131 |
+| Zümrüt | Yedigen | 420 | 180 |
+| Elmas | Sekizgen | 900 | 222 |
 | Kadim Çekirdek | On ikigen | 50000 | 274 |
 
 ## Özellikler
 
-- 4 biyom: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği (550m derinlik)
+- 4 biyom: Üst Kabuk, Kuvars Mağaraları, Bazalt & Gaz Katmanı, Magma Çekirdeği (550m derinlik); 3-4. katmanlarda yalnız derin madenler (Altın, Zümrüt ve kanat jeodlarında Elmas) bulunur
+- **Damar & Jeod Üretimi + Eksen Dışı Mühürlü Çekirdek:** Zengin damarlar ağırlıklı olarak kanatlara yerleşir; Kadim Çekirdek her oyunda rastgele bir kanatta kırılmaz Temel Kaya (Bedrock) odasında gizlidir ve Radar Sv.4-5 sismik sensörle tespit edilir
 - **Online Co-op (P2P WebRTC / PeerJS):** Sunucusuz, oda koduyla (`POLY-XXXXXX`) arkadaşlarınla birlikte madencilik yapma, ortak şirket kasası, anlık tünel/ray paylaşımı ve özelleştirilebilir Mecha Pod renkleri
 - Pürüzsüz düşme hasarı ve itici kontrolü: `1` blok düşüş güvenli (`0` hasar), daha yüksek düşüşlerde pürüzsüz üstel hasar eğrisi ve `[W]` ile ekstra `%50` retro-fren yavaşlatması
-- Yakıt (`60L` başlangıç deposu, `$1.00/L`), gövde hasarı, ısı ve hararet yönetimi
-- Dükkân: matkap, gövde, yakıt deposu, radyatör vb. geliştirmeler
-- Sarf malzemeleri: yedek yakıt, tamir kiti, ışınlayıcı, dinamit, asansör rayı ($25)
-- Manyetik asansör rayı ile yakıtsız, hasarsız ve otomatik yukarı/aşağı seyir
-- Düşen heyelan kayaları, gizli hazine sandıkları ve Arkeoloji Fosil Müzesi
+- Yakıt (`60L` başlangıç deposu, `$1.00/L`), gövde hasarı, derinlik/magma yakınlığı harareti ve radyatör yönetimi
+- Dükkân: matkap, gövde, yakıt deposu, tavan uçuş hızını artıran motor, radar ve radyatör geliştirmeleri
+- Sarf malzemeleri: yedek yakıt, tamir kiti, ışınlayıcı, dinamit (Bedrock & Çekirdeğe bağışık), asansör rayı ($25; 1-3. katmanda serbest)
+- Manyetik asansör rayı ile 1-3. katmanlarda yakıtsız, hasarsız ve otomatik yukarı/aşağı seyir
+- Düşen heyelan kayaları, gizli hazine sandıkları ve haritaya gömülü Arkeoloji Fosil Müzesi (Radar Sv.3+ sis altından parlar)
 - Sol kenar dikey derinlik mini-radarı ve sis (fog of war)
 - Güvenli otomatik kayıt (`localStorage` - misafir modunda solo kayıt korunur)
 - Mobil uyumlu dokunmatik kontroller (D-Pad ve eylem butonları)

@@ -19,7 +19,8 @@ export const VALID_TILE_TYPES: Set<number> = new Set([
   TileType.GAS_POCKET,
   TileType.MAGMA_ROCK,
   TileType.ANCIENT_CORE,
-  TileType.CHEST
+  TileType.CHEST,
+  TileType.BEDROCK
 ]);
 
 export function isValidTileType(t: unknown): t is TileType {

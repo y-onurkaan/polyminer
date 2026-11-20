@@ -6,7 +6,23 @@ export const GRID_HEIGHT = 280;
 export const SURFACE_ROW = 3; // Rows 0, 1, 2 are sky; Row 3 is surface level
 
 // Radar / Fog of War Constants
-export const DEFAULT_RADAR_RADIUS = 2.5; // In tile units
+export const DEFAULT_RADAR_RADIUS = 2.4; // In tile units
+
+// Thermal, Hazard & Rail Limits
+export const MAGMA_NO_RAIL_START_ROW = 206; // Biome 4 (Magma Çekirdeği, 406m+): steel elevator rails melt
+export const GAS_POCKET_BASE_DAMAGE = 35;
+export const GAS_POCKET_HEAT_SPIKE = 20;
+export const MAGMA_ROCK_BASE_DAMAGE = 42;
+export const MAGMA_ROCK_HEAT_SPIKE = 35;
+export const MAGMA_PROXIMITY_HEAT_RATE = 22.0; // heat/s when touching or adjacent to magma rock
+export const MAGMA_AMBIENT_HEAT_RATE = 4.5; // heat/s passive thermal creep in Biome 4
+
+const ENGINE_MAX_FLY_SPEEDS = [-230, -270, -315, -365, -420] as const;
+
+export function getMaxFlySpeed(engineLevel: number = 1): number {
+  const clamped = Math.max(1, Math.min(ENGINE_MAX_FLY_SPEEDS.length, Math.floor(engineLevel || 1)));
+  return ENGINE_MAX_FLY_SPEEDS[clamped - 1];
+}
 
 // Fall Damage & Retro-Thruster Constants
 export const SAFE_LANDING_SPEED = 270; // px/s (1 block = ~240 px/s is safely below threshold)
@@ -132,7 +148,7 @@ export const CONSUMABLES = {
     key: 'C',
     cost: 25,
     amount: 1,
-    desc: 'Çelik Ray (Boş hücreye [C] ile döşenir, yerçekimsiz & yakıtsız ulaşım)'
+    desc: 'Çelik Ray (Boş hücreye [C] ile döşenir; 4. Katman Magma ısısında kurulamaz)'
   }
 };
 
@@ -169,8 +185,8 @@ export const ORE_DEFINITIONS: Record<string, OreDefinition> = {
     name: 'Altın',
     sides: 6,
     color: '#facc15',
-    value: 240,
-    minDepth: 130,
+    value: 200,
+    minDepth: 131,
     hardness: 2.2
   },
   EMERALD: {
@@ -178,8 +194,8 @@ export const ORE_DEFINITIONS: Record<string, OreDefinition> = {
     name: 'Zümrüt',
     sides: 7,
     color: '#10b981',
-    value: 520,
-    minDepth: 185,
+    value: 420,
+    minDepth: 180,
     hardness: 3.0
   },
   DIAMOND: {
@@ -187,8 +203,8 @@ export const ORE_DEFINITIONS: Record<string, OreDefinition> = {
     name: 'Elmas',
     sides: 8,
     color: '#38bdf8',
-    value: 1350,
-    minDepth: 225,
+    value: 900,
+    minDepth: 222,
     hardness: 4.0
   },
   ANCIENT_CORE: {
@@ -269,7 +285,7 @@ export const RELIC_DEFINITIONS: Record<string, RelicDefinition> = {
 
 export const RELICS: RelicDefinition[] = Object.values(RELIC_DEFINITIONS);
 export const BASE_ELEVATOR_SPEED = 380;
-export const MUSEUM_CURATOR_REWARD = 15000;
+export const MUSEUM_CURATOR_REWARD = 5000;
 
 export interface OreRequirement {
   [oreId: string]: number;
@@ -299,8 +315,8 @@ export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
       { level: 1, value: 1.25, label: '1.25x (Standart)', cost: 0 },
       { level: 2, value: 1.85, label: '1.85x (+%48)', cost: 150, oreReqs: { iron: 2 } },
       { level: 3, value: 2.60, label: '2.60x (+%108)', cost: 550, oreReqs: { silver: 3 } },
-      { level: 4, value: 3.75, label: '3.75x (Kaya Kırıcı)', cost: 1600, oreReqs: { gold: 3 } },
-      { level: 5, value: 5.50, label: '5.50x (Ultra Matkap)', cost: 4200, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 4, value: 3.75, label: '3.75x (Kaya Kırıcı)', cost: 2500, oreReqs: { gold: 3 } },
+      { level: 5, value: 5.50, label: '5.50x (Ultra Matkap)', cost: 5200, oreReqs: { emerald: 3, diamond: 2 } }
     ]
   },
   fuelTank: {
@@ -311,8 +327,8 @@ export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
       { level: 1, value: 60, label: '60 Litre', cost: 0 },
       { level: 2, value: 110, label: '110 Litre', cost: 120, oreReqs: { iron: 2 } },
       { level: 3, value: 185, label: '185 Litre', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 290, label: '290 Litre', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 450, label: '450 Litre', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 4, value: 290, label: '290 Litre', cost: 2300, oreReqs: { gold: 3 } },
+      { level: 5, value: 450, label: '450 Litre', cost: 4700, oreReqs: { gold: 4, emerald: 2, diamond: 1 } }
     ]
   },
   cargo: {
@@ -323,32 +339,32 @@ export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
       { level: 1, value: 10, label: '10 Adet', cost: 0 },
       { level: 2, value: 16, label: '16 Adet', cost: 100, oreReqs: { iron: 2 } },
       { level: 3, value: 25, label: '25 Adet', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 40, label: '40 Adet', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 65, label: '65 Adet', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 4, value: 34, label: '34 Adet', cost: 2300, oreReqs: { gold: 3 } },
+      { level: 5, value: 48, label: '48 Adet', cost: 4700, oreReqs: { gold: 4, emerald: 3 } }
     ]
   },
   engine: {
     name: 'Motor İtki Gücü',
-    desc: 'Yukarı tırmanış hızını ve kaçış gücünü artırır',
+    desc: 'Yukarı tırmanış tavan hızını ve itki gücünü artırır',
     icon: '🚀',
     levels: [
-      { level: 1, value: 1500, label: '1500 kW', cost: 0 },
-      { level: 2, value: 1850, label: '1850 kW', cost: 130, oreReqs: { iron: 2 } },
-      { level: 3, value: 2300, label: '2300 kW', cost: 520, oreReqs: { silver: 3 } },
-      { level: 4, value: 2850, label: '2850 kW', cost: 1550, oreReqs: { gold: 3 } },
-      { level: 5, value: 3600, label: '3600 kW', cost: 4000, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 1, value: 1500, label: '1500 kW · 230 m/s', cost: 0 },
+      { level: 2, value: 1850, label: '1850 kW · 270 m/s', cost: 130, oreReqs: { iron: 2 } },
+      { level: 3, value: 2300, label: '2300 kW · 315 m/s', cost: 520, oreReqs: { silver: 3 } },
+      { level: 4, value: 2850, label: '2850 kW · 365 m/s', cost: 2350, oreReqs: { gold: 3 } },
+      { level: 5, value: 3600, label: '3600 kW · 420 m/s', cost: 4900, oreReqs: { emerald: 3, diamond: 1 } }
     ]
   },
   radar: {
     name: 'Yeraltı Radarı',
-    desc: 'Sis altındaki madenleri daha uzaktan tespit eder',
+    desc: 'Sisi açar; Sv.3 fosil parıltısı, Sv.4-5 sismik çekirdek sinyali açar',
     icon: '📡',
     levels: [
-      { level: 1, value: 2.5, label: '2.5 Blok (Temel)', cost: 0 },
-      { level: 2, value: 3.5, label: '3.5 Blok (+%40)', cost: 140, oreReqs: { iron: 2 } },
-      { level: 3, value: 4.5, label: '4.5 Blok (+%80)', cost: 520, oreReqs: { silver: 3 } },
-      { level: 4, value: 5.8, label: '5.8 Blok (+%132)', cost: 1550, oreReqs: { gold: 3 } },
-      { level: 5, value: 7.5, label: '7.5 Blok (Derin Tarama)', cost: 3900, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 1, value: 2.4, label: '2.4 Blok (Temel)', cost: 0 },
+      { level: 2, value: 3.2, label: '3.2 Blok (+%33)', cost: 140, oreReqs: { iron: 2 } },
+      { level: 3, value: 4.0, label: '4.0 Blok · Fosil Parıltısı', cost: 520, oreReqs: { silver: 3 } },
+      { level: 4, value: 4.8, label: '4.8 Blok · Derin Sismik Tarama', cost: 2350, oreReqs: { gold: 3 } },
+      { level: 5, value: 5.6, label: '5.6 Blok · Tam Çekirdek Sensörü', cost: 4800, oreReqs: { emerald: 2, diamond: 2 } }
     ]
   },
   hull: {
@@ -359,8 +375,8 @@ export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
       { level: 1, value: 100, label: '100 HP (Standart)', cost: 0 },
       { level: 2, value: 150, label: '150 HP (-%10 Hasar)', cost: 120, oreReqs: { iron: 2 } },
       { level: 3, value: 220, label: '220 HP (-%20 Hasar)', cost: 500, oreReqs: { silver: 3 } },
-      { level: 4, value: 320, label: '320 HP (-%30 Hasar)', cost: 1500, oreReqs: { gold: 3 } },
-      { level: 5, value: 450, label: '450 HP (-%40 Hasar)', cost: 3800, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 4, value: 320, label: '320 HP (-%30 Hasar)', cost: 2250, oreReqs: { gold: 3 } },
+      { level: 5, value: 450, label: '450 HP (-%40 Hasar)', cost: 4700, oreReqs: { gold: 4, emerald: 2, diamond: 1 } }
     ]
   },
   radiator: {
@@ -371,8 +387,8 @@ export const UPGRADES: Record<UpgradeKey, UpgradeConfig> = {
       { level: 1, value: 20, label: '20%/s (Standart Fan)', cost: 0 },
       { level: 2, value: 28, label: '28%/s (Sıvı Soğutma - %10 Direnç)', cost: 180, oreReqs: { iron: 2 } },
       { level: 3, value: 38, label: '38%/s (Termoelektrik - %20 Direnç)', cost: 600, oreReqs: { silver: 3 } },
-      { level: 4, value: 50, label: '50%/s (Kriyojenik - %30 Direnç)', cost: 1750, oreReqs: { gold: 3 } },
-      { level: 5, value: 65, label: '65%/s (Plazma Emici - %40 Direnç)', cost: 4200, oreReqs: { emerald: 3, diamond: 1 } }
+      { level: 4, value: 50, label: '50%/s (Kriyojenik - %30 Direnç)', cost: 2500, oreReqs: { gold: 3 } },
+      { level: 5, value: 65, label: '65%/s (Plazma Emici - %40 Direnç)', cost: 5200, oreReqs: { emerald: 3, diamond: 2 } }
     ]
   }
 };

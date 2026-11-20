@@ -112,12 +112,13 @@ describe('P2P Sanitization & Validation Helpers', () => {
   });
 
   describe('isValidTileType', () => {
-    it('accepts valid TileType enum numbers', () => {
+    it('accepts valid TileType enum numbers including BEDROCK', () => {
       expect(isValidTileType(TileType.EMPTY)).toBe(true);
       expect(isValidTileType(TileType.DIRT)).toBe(true);
       expect(isValidTileType(TileType.ROCK)).toBe(true);
       expect(isValidTileType(TileType.ORE)).toBe(true);
       expect(isValidTileType(TileType.CHEST)).toBe(true);
+      expect(isValidTileType(TileType.BEDROCK)).toBe(true);
     });
 
     it('rejects numbers outside TileType enum and non-numbers', () => {
@@ -141,12 +142,18 @@ describe('P2P Sanitization & Validation Helpers', () => {
       return grid;
     }
 
-    it('accepts a valid GRID_HEIGHT x GRID_WIDTH world grid', () => {
+    it('accepts a valid GRID_HEIGHT x GRID_WIDTH world grid including BEDROCK', () => {
       const valid = createMockGrid();
       valid[3][5] = { t: TileType.ORE, r: 1, o: 'COPPER' };
       valid[10][2] = { t: TileType.EMPTY, r: 1, e: 1 };
       valid[50][12] = { t: TileType.DIRT, r: 0, m: 'dino_skull' };
+      valid[274][6] = { t: TileType.BEDROCK, r: 1 };
       expect(isValidSavedGrid(valid)).toBe(true);
+
+      const targetWorld = createEmptyWorld();
+      applySavedGrid(valid, targetWorld);
+      expect(targetWorld[274][6].type).toBe(TileType.BEDROCK);
+      expect(targetWorld[274][6].hardness).toBe(Infinity);
     });
 
     it('rejects grids with wrong row or column counts', () => {

@@ -12,9 +12,17 @@ import {
   CONSUMABLES,
   BASE_ELEVATOR_SPEED,
   RELIC_DEFINITIONS,
+  MAGMA_NO_RAIL_START_ROW,
+  GAS_POCKET_BASE_DAMAGE,
+  GAS_POCKET_HEAT_SPIKE,
+  MAGMA_ROCK_BASE_DAMAGE,
+  MAGMA_ROCK_HEAT_SPIKE,
+  MAGMA_PROXIMITY_HEAT_RATE,
+  MAGMA_AMBIENT_HEAT_RATE,
   getBiomeForDepth,
   getBiomeTier,
-  getUpgradeLevelValue
+  getUpgradeLevelValue,
+  getMaxFlySpeed
 } from './constants';
 import { revealTilesAround, revealAdjacentTiles, markWorldDirty } from './world';
 import { sounds } from './audio';
@@ -33,11 +41,14 @@ import { emitGameEvent } from './events';
 
 let drillChipTimer = 0;
 let thrustDustTimer = 0;
+let lastRailWarnTime = 0;
 
 function getTileParticleColor(tile: Tile, gy: number): string {
   switch (tile.type) {
     case TileType.ROCK:
       return '#64748b';
+    case TileType.BEDROCK:
+      return '#334155';
     case TileType.ORE:
       return tile.ore?.color || '#facc15';
     case TileType.GAS_POCKET:
@@ -199,30 +210,17 @@ export function awardRelic(player: PlayerExtendedState, relicId: string): void {
 }
 
 /**
- * Checks if mined tile contains a pre-seeded relic or rolls 2.5% discovery chance.
+ * Checks if mined tile contains a pre-seeded archaeological relic (lottery removed).
  */
-export function checkAndAwardRelicAt(player: PlayerExtendedState, tile: Tile, gy: number): void {
+export function checkAndAwardRelicAt(player: PlayerExtendedState, tile: Tile, _gy: number): void {
   if (tile.relicId) {
     awardRelic(player, tile.relicId);
     delete tile.relicId;
-    return;
-  }
-
-  // 2.5% chance to uncover a depth-appropriate relic
-  if (Math.random() < 0.025) {
-    const depthMeters = Math.max(0, (gy - SURFACE_ROW) * 2);
-    const eligible = Object.values(RELIC_DEFINITIONS).filter(
-      r => depthMeters >= r.minDepth && depthMeters <= r.maxDepth && !player.discoveredRelics?.includes(r.id)
-    );
-    if (eligible.length > 0) {
-      const chosen = eligible[Math.floor(Math.random() * eligible.length)];
-      awardRelic(player, chosen.id);
-    }
   }
 }
 
 /**
- * Deploys an industrial elevator rail in current empty cell.
+ * Deploys an industrial elevator rail in current empty cell (disabled in Magma Biome 4 thermal zone).
  */
 export function deployElevatorRail(player: PlayerExtendedState, world: Tile[][]): boolean {
   if (player.inventory.elevatorRails <= 0) {
@@ -234,6 +232,21 @@ export function deployElevatorRail(player: PlayerExtendedState, world: Tile[][])
   const pMidGy = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
 
   if (pMidGy < SURFACE_ROW || pMidGy >= GRID_HEIGHT || pMidGx < 0 || pMidGx >= GRID_WIDTH) {
+    return false;
+  }
+
+  if (pMidGy >= MAGMA_NO_RAIL_START_ROW) {
+    const now = performance.now();
+    if (now - lastRailWarnTime > 900) {
+      lastRailWarnTime = now;
+      sounds.playClank();
+      addFloatingText(
+        player.x + PLAYER_WIDTH / 2,
+        player.y - 16,
+        '🌋 MAGMA ISISINDA RAY ERİR! (4. Katmanda Kurulamaz)',
+        '#f97316'
+      );
+    }
     return false;
   }
 
@@ -759,33 +772,38 @@ export function updatePlayer(
       // 2. GAS POCKET Hazard Detonation
       else if (targetTile!.type === TileType.GAS_POCKET) {
         const tabletMult = player.discoveredRelics?.includes('obsidian_tablet') ? 0.75 : 1.0;
-        const damage = Math.max(1, Math.round(20 * getDamageReductionFactor(player.upgrades.hull) * tabletMult));
+        const damage = Math.max(
+          1,
+          Math.round(GAS_POCKET_BASE_DAMAGE * getDamageReductionFactor(player.upgrades.hull) * tabletMult)
+        );
         player.hull = Math.max(0, player.hull - damage);
-        player.vy = -220; // Recoil blast upwards
-        player.vx = player.facing === 'left' ? 140 : player.facing === 'right' ? -140 : 0;
+        player.vy = -250; // Stronger recoil blast upwards
+        player.vx = player.facing === 'left' ? 160 : player.facing === 'right' ? -160 : 0;
+        const hazardRad = getRadiatorSpecs(player.upgrades.radiator || 1);
+        const hazardCoreAbsorb = player.discoveredRelics?.includes('core_shard') ? 0.80 : 1.0;
+        player.heat = Math.min(100, player.heat + GAS_POCKET_HEAT_SPIKE * hazardRad.heatAbsorptionMult * hazardCoreAbsorb);
         addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 16, `-${damage} GAZ PATLAMASI!`, '#ef4444');
         sounds.playExplosion();
         spawnSparkBurst(tileCenterX, tileCenterY, '#a3e635', 16, 170);
         addScreenShake(7.5, 0.28);
         addDamageFlash(0.42);
       }
-      // 3. MAGMA ROCK Thermal Burn & Crystal Cash Bonus
+      // 3. MAGMA ROCK Thermal Burn (no cash payout)
       else if (targetTile!.type === TileType.MAGMA_ROCK) {
         const tabletMult = player.discoveredRelics?.includes('obsidian_tablet') ? 0.75 : 1.0;
-        const damage = Math.max(1, Math.round(25 * getDamageReductionFactor(player.upgrades.hull) * tabletMult));
+        const damage = Math.max(
+          1,
+          Math.round(MAGMA_ROCK_BASE_DAMAGE * getDamageReductionFactor(player.upgrades.hull) * tabletMult)
+        );
         player.hull = Math.max(0, player.hull - damage);
-        const bonus = Math.floor(Math.random() * (600 - 250 + 1)) + 250;
-        player.money += bonus;
-        addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 24, `-${damage} ISI HASARI!`, '#ef4444');
-        addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 8, `+$${bonus} TERMAL KRİSTAL`, '#f59e0b');
+        const hazardRad = getRadiatorSpecs(player.upgrades.radiator || 1);
+        const hazardCoreAbsorb = player.discoveredRelics?.includes('core_shard') ? 0.80 : 1.0;
+        player.heat = Math.min(100, player.heat + MAGMA_ROCK_HEAT_SPIKE * hazardRad.heatAbsorptionMult * hazardCoreAbsorb);
+        addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 16, `-${damage} MAGMA YANIĞI! +ISI`, '#ef4444');
         sounds.playSteamSizzle();
         spawnSparkBurst(tileCenterX, tileCenterY, '#f97316', 16, 150);
-        addScreenShake(5.5, 0.22);
-        addDamageFlash(0.35);
-        emitGameEvent('polyminer:wallet-changed', {
-          changeAmount: bonus,
-          reason: 'Termal Kristal'
-        });
+        addScreenShake(6.5, 0.24);
+        addDamageFlash(0.38);
       }
       // 4. Broken Hard Rock
       else if (targetTile!.type === TileType.ROCK) {
@@ -852,6 +870,10 @@ export function updatePlayer(
       player.isDrilling = false;
       player.drillProgress = 0;
       player.drillTarget = null;
+
+      if (player.heat >= 100 && player.heatLockoutTimer <= 0) {
+        triggerOverheatLockout(player);
+      }
     }
     return;
   } else {
@@ -861,6 +883,7 @@ export function updatePlayer(
   // 2. ACTIVE HARARET (OVERHEAT) VE TERMAL YÖNETİM MEKANİĞİ
   const radiator = getRadiatorSpecs(player.upgrades.radiator || 1);
   const coreShardBonusCool = player.discoveredRelics?.includes('core_shard') ? 15 : 0;
+  const coreShardAbsorption = player.discoveredRelics?.includes('core_shard') ? 0.80 : 1.0;
   const currentDepthRow = Math.floor((player.y + h / 2) / TILE_SIZE);
   const currentBiomeTier = getBiomeTier(currentDepthRow);
 
@@ -871,28 +894,7 @@ export function updatePlayer(
     player.fuel = Math.max(0, player.fuel - IDLE_FUEL_DRAIN * amberMult * dt);
   }
 
-  // Forced Cooldown if in Overheat Lockout (2.5s)
-  if (player.heatLockoutTimer > 0) {
-    player.heatLockoutTimer = Math.max(0, player.heatLockoutTimer - dt);
-    const forcedCoolingRate = 40.0; // Cools down ~100% in 2.5s
-    player.heat = Math.max(0, player.heat - forcedCoolingRate * dt);
-    if (player.heatLockoutTimer <= 0) {
-      sounds.playElevatorChime('stop');
-      addFloatingText(player.x + w / 2, player.y - 14, '❄️ MOTOR SOĞUDU', '#22d3ee');
-    }
-  } else {
-    // Natural Cooling when NOT drilling and NOT thrusting
-    if (!player.isDrilling && !player.isThrusting) {
-      const depthPenalty = (currentBiomeTier - 1) * 3.5;
-      let effectiveCooling = Math.max(8, (radiator.coolingRate + coreShardBonusCool) - depthPenalty);
-      if (player.isInElevator || player.elevatorAuto) {
-        effectiveCooling *= 1.6; // Superconducting cooled elevator shaft
-      }
-      player.heat = Math.max(0, player.heat - effectiveCooling * dt);
-    }
-  }
-
-  // Magma Rock proximity heat emission
+  // Magma Rock proximity detection (3x3 around player center)
   const pCheckGx = Math.floor((player.x + w / 2) / TILE_SIZE);
   const pCheckGy = Math.floor((player.y + h / 2) / TILE_SIZE);
   let nearMagma = false;
@@ -905,8 +907,35 @@ export function updatePlayer(
     }
     if (nearMagma) break;
   }
-  if (nearMagma && player.heatLockoutTimer <= 0) {
-    player.heat = Math.min(100, player.heat + 8.0 * dt);
+
+  // Forced Cooldown if in Overheat Lockout (2.5s)
+  if (player.heatLockoutTimer > 0) {
+    player.heatLockoutTimer = Math.max(0, player.heatLockoutTimer - dt);
+    const forcedCoolingRate = 40.0; // Cools down ~100% in 2.5s
+    player.heat = Math.max(0, player.heat - forcedCoolingRate * dt);
+    if (player.heatLockoutTimer <= 0) {
+      sounds.playElevatorChime('stop');
+      addFloatingText(player.x + w / 2, player.y - 14, '❄️ MOTOR SOĞUDU', '#22d3ee');
+    }
+  } else {
+    let passiveHeatRate = 0;
+    if (currentBiomeTier >= 4 && !player.isInElevator && !player.elevatorAuto) {
+      passiveHeatRate += MAGMA_AMBIENT_HEAT_RATE * radiator.heatAbsorptionMult * coreShardAbsorption;
+    }
+    if (nearMagma) {
+      passiveHeatRate += MAGMA_PROXIMITY_HEAT_RATE * radiator.heatAbsorptionMult * coreShardAbsorption;
+    }
+
+    let coolingRate = 0;
+    if (!player.isDrilling && !player.isThrusting) {
+      const depthPenalty = (currentBiomeTier - 1) * 4.0;
+      coolingRate = Math.max(8, (radiator.coolingRate + coreShardBonusCool) - depthPenalty);
+      if (player.isInElevator || player.elevatorAuto) {
+        coolingRate *= 1.6; // Superconducting cooled elevator shaft
+      }
+    }
+
+    player.heat = Math.max(0, Math.min(100, player.heat + (passiveHeatRate - coolingRate) * dt));
   }
 
   // 100% Overheat Lockout Trigger
@@ -1028,8 +1057,9 @@ export function updatePlayer(
           ? player.thrusterPower * FALL_BRAKE_MULTIPLIER
           : player.thrusterPower;
         player.vy -= effectiveThrust * dt;
-        if (player.vy < MAX_FLY_SPEED) {
-          player.vy = MAX_FLY_SPEED;
+        const maxFlySpeed = getMaxFlySpeed(player.upgrades.engine || 1);
+        if (player.vy < maxFlySpeed) {
+          player.vy = maxFlySpeed;
         }
         player.fuel = Math.max(0, player.fuel - THRUST_FUEL_DRAIN * amberMult * dt);
         player.heat = Math.min(100, player.heat + 10.0 * dt); // Rocket thrust builds heat
@@ -1244,6 +1274,19 @@ export function updatePlayer(
 
     // Helper for biome & drill tier gating
     const checkDrillTierGate = (tile: Tile | null | undefined, targetGy: number): boolean => {
+      if (tile && tile.type === TileType.BEDROCK) {
+        if (now - lastRockWarnTime > 800) {
+          lastRockWarnTime = now;
+          sounds.playClank();
+          addFloatingText(
+            player.x + PLAYER_WIDTH / 2,
+            player.y - 14,
+            '🛡️ KIRILMAZ TEMEL KAYA (Yandan Giriş Ara)',
+            '#94a3b8'
+          );
+        }
+        return true;
+      }
       if (
         !tile ||
         tile.type === TileType.EMPTY ||
@@ -1436,6 +1479,9 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
 
   let collectedOreCount = 0;
   let clearedAnyTile = false;
+  let hitProtectedBlock = false;
+  const dynamiteRad = getRadiatorSpecs(player.upgrades.radiator || 1);
+  const dynamiteCoreAbsorb = player.discoveredRelics?.includes('core_shard') ? 0.80 : 1.0;
 
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -1449,7 +1495,17 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
       const tile = world[gy]?.[gx];
       if (!tile) continue;
 
-      if (tile.type === TileType.EMPTY || tile.type === TileType.FUEL_PAD || tile.type === TileType.SHOP_PAD) {
+      if (tile.type === TileType.BEDROCK || tile.type === TileType.ANCIENT_CORE) {
+        hitProtectedBlock = true;
+        continue;
+      }
+
+      if (
+        tile.type === TileType.EMPTY ||
+        tile.type === TileType.FUEL_PAD ||
+        tile.type === TileType.SHOP_PAD ||
+        !Number.isFinite(tile.hardness)
+      ) {
         continue;
       }
 
@@ -1473,26 +1529,9 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
         continue;
       }
 
-      // Ancient Core Blasted by Dynamite!
-      let conqueredAncientCore = false;
-      if (tile.type === TileType.ANCIENT_CORE) {
-        player.money += 50000;
-        if (tile.ore && player.cargo.length < player.maxCargo) {
-          player.cargo.push(tile.ore);
-        }
-        sounds.playVictoryFanfare();
-        addFloatingText(
-          gx * TILE_SIZE + TILE_SIZE / 2,
-          gy * TILE_SIZE + TILE_SIZE / 2,
-          '🏆 KADİM ÇEKİRDEK FETHEDİLDİ! +$50,000',
-          '#ec4899'
-        );
-        player.hasWon = true;
-        conqueredAncientCore = true;
-        emitGameEvent('polyminer:wallet-changed', {
-          changeAmount: 50000,
-          reason: 'Kadim Çekirdek Fethi'
-        });
+      // Blasting magma rock vents thermal heat splash
+      if (tile.type === TileType.MAGMA_ROCK) {
+        player.heat = Math.min(99, player.heat + 12 * dynamiteRad.heatAbsorptionMult * dynamiteCoreAbsorb);
       }
 
       // Check for Rare Archaeological Relic discovery via dynamite!
@@ -1509,9 +1548,6 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
       checkAndTriggerFallingRock(world, gx, gy);
 
       emitGameEvent('polyminer:tile-changed', { gx, gy, tileType: TileType.EMPTY });
-      if (conqueredAncientCore) {
-        emitGameEvent('polyminer:victory', { winnerName: player.name || 'Madenci' });
-      }
     }
   }
 
@@ -1526,6 +1562,9 @@ export function detonateDynamite(player: PlayerExtendedState, world: Tile[][]): 
   spawnBlockBreakBurst(blastPxX, blastPxY, '#64748b', 14);
   sounds.playExplosion();
   addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 18, '💥 SİSMİK DİNAMİT!', '#facc15');
+  if (hitProtectedBlock) {
+    addFloatingText(player.x + PLAYER_WIDTH / 2, player.y - 34, '🛡️ ZIRHLI KAYA / ÇEKİRDEK DİNAMİTE DAYANIKLI', '#f43f5e');
+  }
 
   if (collectedOreCount > 0) {
     sounds.playGemCollect(6);

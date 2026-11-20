@@ -5,10 +5,11 @@ import {
   GRID_HEIGHT,
   SURFACE_ROW,
   SAFE_LANDING_SPEED,
+  MAGMA_NO_RAIL_START_ROW,
   getBiomeForDepth
 } from './constants';
 import { PlayerExtendedState, PLAYER_WIDTH, PLAYER_HEIGHT, MAX_FALL_SPEED, getBlockTier } from './player';
-import { getWorldRenderVersion } from './world';
+import { getWorldRenderVersion, findAncientCoreCoords } from './world';
 import { getDamageFlashAlpha, getBiomeBanner } from './effects';
 
 let radarCacheCanvas: HTMLCanvasElement | null = null;
@@ -1130,6 +1131,32 @@ export function renderWorld(
           if (nearLeft) ctx.fillRect(screenX, screenY, 5, TILE_SIZE);
           if (nearRight) ctx.fillRect(screenX + TILE_SIZE - 5, screenY, 5, TILE_SIZE);
         }
+
+        // Radar Lv.3+: faint amber sonar shimmer for nearby hidden relics under fog
+        if (player && (player.upgrades.radar || 1) >= 3 && tile.relicId) {
+          const pGx = (player.x + PLAYER_WIDTH / 2) / TILE_SIZE;
+          const pGy = (player.y + PLAYER_HEIGHT / 2) / TILE_SIZE;
+          const dist = Math.hypot(x + 0.5 - pGx, y + 0.5 - pGy);
+          const scanMax = (player.radarRadius || 4) + 2.5;
+          if (dist <= scanMax) {
+            const fade = Math.max(0.2, 1 - dist / (scanMax + 0.5));
+            const pulse = 0.5 + 0.5 * Math.sin(now * 0.006 + x * 3 + y * 5);
+            const cx = screenX + TILE_SIZE / 2;
+            const cy = screenY + TILE_SIZE / 2;
+            ctx.save();
+            ctx.strokeStyle = `rgba(251, 191, 36, ${(0.28 + pulse * 0.35) * fade})`;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 8 + pulse * 6, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = `rgba(254, 240, 138, ${(0.3 + pulse * 0.35) * fade})`;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
         continue; // Never draw ores or rocks on unrevealed tiles!
       }
 
@@ -1238,6 +1265,44 @@ export function renderWorld(
               ctx.fillStyle = '#facc15';
               ctx.fillRect(screenX + TILE_SIZE - 8, screenY + 4, 4, 4);
             }
+          }
+          break;
+        }
+
+        case TileType.BEDROCK: {
+          // Indestructible obsidian vault armor block
+          ctx.fillStyle = '#0b0e15';
+          ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+
+          ctx.fillStyle = '#182030';
+          ctx.fillRect(screenX + 4, screenY + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+
+          ctx.strokeStyle = '#334155';
+          ctx.lineWidth = 1.4;
+          ctx.strokeRect(screenX + 2, screenY + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+
+          // Structural diagonal cross-ribs
+          ctx.strokeStyle = '#2a3548';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(screenX + 5, screenY + 5);
+          ctx.lineTo(screenX + TILE_SIZE - 5, screenY + TILE_SIZE - 5);
+          ctx.moveTo(screenX + TILE_SIZE - 5, screenY + 5);
+          ctx.lineTo(screenX + 5, screenY + TILE_SIZE - 5);
+          ctx.stroke();
+
+          // 4 corner metallic rivets
+          ctx.fillStyle = '#475569';
+          ctx.fillRect(screenX + 4, screenY + 4, 3, 3);
+          ctx.fillRect(screenX + TILE_SIZE - 7, screenY + 4, 3, 3);
+          ctx.fillRect(screenX + 4, screenY + TILE_SIZE - 7, 3, 3);
+          ctx.fillRect(screenX + TILE_SIZE - 7, screenY + TILE_SIZE - 7, 3, 3);
+
+          // Subtle sacred vault seam glow near Ancient Core depth
+          if (y >= GRID_HEIGHT - 8) {
+            ctx.strokeStyle = 'rgba(236, 72, 153, 0.24)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(screenX + 8, screenY + 8, TILE_SIZE - 16, TILE_SIZE - 16);
           }
           break;
         }
@@ -1764,6 +1829,9 @@ export function renderMiniRadar(
           } else if (tile.type === TileType.GAS_POCKET) {
             cCtx.fillStyle = '#a3e635';
             cCtx.fillRect(tx, ty, scaleX, tileH);
+          } else if (tile.type === TileType.BEDROCK) {
+            cCtx.fillStyle = '#64748b';
+            cCtx.fillRect(tx, ty, scaleX, tileH);
           }
         }
       }
@@ -1782,10 +1850,28 @@ export function renderMiniRadar(
     ctx.drawImage(radarCacheCanvas, mapX, mapY);
   }
 
-  // Draw Endgame Ancient Core Target Indicator at center (12, GRID_HEIGHT - 4)
-  const corePulse = Math.sin(now * 0.009) > 0;
-  ctx.fillStyle = corePulse ? '#f43f5e' : '#ec4899';
-  ctx.fillRect(mapX + 11 * scaleX, mapY + (GRID_HEIGHT - 4) * scaleY, scaleX * 2, Math.max(2, scaleY * 2));
+  // Ancient Core Indicator: exact dot ONLY once revealed; Radar Lv.4-5 seismic hemisphere hint at depth
+  const coreCoords = findAncientCoreCoords(world);
+  if (coreCoords) {
+    const coreTile = world[coreCoords.gy]?.[coreCoords.gx];
+    const pRow = Math.floor((player.y + PLAYER_HEIGHT / 2) / TILE_SIZE);
+    const radarLv = player.upgrades.radar || 1;
+    const canSenseSeismic = (radarLv >= 5 && pRow >= MAGMA_NO_RAIL_START_ROW) || (radarLv >= 4 && pRow >= 235);
+
+    if (coreTile?.revealed) {
+      const corePulse = Math.sin(now * 0.009) > 0;
+      ctx.fillStyle = corePulse ? '#f43f5e' : '#ec4899';
+      ctx.fillRect(mapX + coreCoords.gx * scaleX, mapY + coreCoords.gy * scaleY, scaleX * 2, Math.max(2, scaleY * 2));
+    } else if (canSenseSeismic) {
+      const wave = 0.5 + 0.5 * Math.sin(now * 0.007);
+      const isLeftWing = coreCoords.gx < GRID_WIDTH / 2;
+      const zoneX = isLeftWing ? mapX : mapX + cacheW / 2;
+      const zoneY = mapY + 258 * scaleY;
+      const zoneH = Math.max(8, (GRID_HEIGHT - 258) * scaleY);
+      ctx.fillStyle = `rgba(236, 72, 153, ${0.14 + wave * 0.22})`;
+      ctx.fillRect(zoneX, zoneY, cacheW / 2, zoneH);
+    }
+  }
 
   // Viewport Camera Frame Box
   const camStartRow = Math.max(0, cameraY / TILE_SIZE);
@@ -2602,7 +2688,8 @@ export function renderScreenOverlays(
   ctx: CanvasRenderingContext2D,
   viewportWidth: number,
   viewportHeight: number,
-  player: PlayerExtendedState
+  player: PlayerExtendedState,
+  world?: Tile[][]
 ): void {
   const cx = viewportWidth / 2;
   const cy = viewportHeight / 2;
@@ -2678,6 +2765,51 @@ export function renderScreenOverlays(
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, viewportWidth / 2, pillY + pillH / 2 - 1);
+      ctx.restore();
+    }
+  }
+
+  // 4. Radar Lv.4-5 Seismic Ancient Core Signal Pill
+  if (world) {
+    const coreCoords = findAncientCoreCoords(world);
+    const radarLv = player.upgrades.radar || 1;
+    const playerGx = (player.x + PLAYER_WIDTH / 2) / TILE_SIZE;
+    const playerGy = (player.y + PLAYER_HEIGHT / 2) / TILE_SIZE;
+    const playerRow = Math.floor(playerGy);
+    const isSignalRange =
+      (radarLv >= 5 && playerRow >= MAGMA_NO_RAIL_START_ROW) ||
+      (radarLv >= 4 && playerRow >= 235);
+
+    if (coreCoords && isSignalRange && !world[coreCoords.gy]?.[coreCoords.gx]?.revealed) {
+      const dx = coreCoords.gx + 0.5 - playerGx;
+      const dist = Math.hypot(dx, coreCoords.gy + 0.5 - playerGy);
+      const dirText = Math.abs(dx) <= 2 ? '▼ ALTINDA' : dx < 0 ? '◀ BATI' : 'DOĞU ▶';
+      const strengthText =
+        dist <= 10 ? 'KRİTİK' : dist <= 22 ? 'GÜÇLÜ' : dist <= 38 ? 'ORTA' : 'ZAYIF';
+      const sigLabel = `📡 ÇEKİRDEK SİNYALİ · ${dirText} · ${strengthText}`;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const pulse = 0.65 + 0.35 * Math.sin(now * 0.008);
+
+      ctx.save();
+      ctx.font = 'bold 11px monospace';
+      const textW = ctx.measureText(sigLabel).width;
+      const pillW = Math.max(230, textW + 28);
+      const pillH = 24;
+      const pillX = (viewportWidth - pillW) / 2;
+      const pillY = banner && banner.timer > 0 ? 48 : 14;
+
+      ctx.fillStyle = 'rgba(24, 7, 24, 0.88)';
+      ctx.strokeStyle = `rgba(236, 72, 153, ${pulse})`;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.roundRect(pillX, pillY, pillW, pillH, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f9a8d4';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(sigLabel, viewportWidth / 2, pillY + pillH / 2);
       ctx.restore();
     }
   }

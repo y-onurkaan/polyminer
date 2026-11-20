@@ -8,7 +8,8 @@ export enum TileType {
   GAS_POCKET = 6,
   MAGMA_ROCK = 7,
   ANCIENT_CORE = 8,
-  CHEST = 9
+  CHEST = 9,
+  BEDROCK = 10
 }
 
 export interface FallingBoulder {

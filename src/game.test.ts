@@ -7,9 +7,14 @@ import {
   SURFACE_ROW,
   ORES,
   ORE_DEFINITIONS,
+  RELIC_DEFINITIONS,
   ROCK_HARDNESS,
   FALL_BRAKE_MULTIPLIER,
-  getUpgradeLevelValue
+  MAGMA_NO_RAIL_START_ROW,
+  GAS_POCKET_BASE_DAMAGE,
+  MAGMA_ROCK_BASE_DAMAGE,
+  getUpgradeLevelValue,
+  getMaxFlySpeed
 } from './constants';
 import {
   createEmptyWorld,
@@ -17,7 +22,8 @@ import {
   computeTileHardness,
   revealTilesAround,
   revealAdjacentTiles,
-  getWorldRenderVersion
+  getWorldRenderVersion,
+  findAncientCoreCoords
 } from './world';
 import {
   createPlayer,
@@ -26,6 +32,8 @@ import {
   getBlockTier,
   computeFallDamage,
   triggerOverheatLockout,
+  checkAndAwardRelicAt,
+  deployElevatorRail,
   buyConsumableItem,
   useConsumableItem,
   detonateDynamite,
@@ -204,7 +212,7 @@ describe('Polyminer Faz A Core Gameplay & Stabilization Tests', () => {
   });
 
   describe('World Generation, Hardness & Save/Load Integrity', () => {
-    it('spawns exactly one ANCIENT_CORE in the final chamber and never as random ORE', () => {
+    it('spawns exactly one off-center ANCIENT_CORE sealed in BEDROCK with inward MAGMA_ROCK gate and never as random ORE', () => {
       const world = generateWorld();
       let ancientCoreTiles = 0;
       let ancientCoreOres = 0;
@@ -219,7 +227,23 @@ describe('Polyminer Faz A Core Gameplay & Stabilization Tests', () => {
 
       expect(ancientCoreTiles).toBe(1);
       expect(ancientCoreOres).toBe(0);
-      expect(world[GRID_HEIGHT - 4][Math.floor(GRID_WIDTH / 2)].type).toBe(TileType.ANCIENT_CORE);
+
+      const core = findAncientCoreCoords(world);
+      expect(core).not.toBeNull();
+      expect(core!.gy).toBe(GRID_HEIGHT - 4);
+      expect(core!.gx <= 7 || core!.gx >= 16).toBe(true);
+
+      // Sealed roof, floor, and outer wall are indestructible BEDROCK
+      expect(world[core!.gy - 2][core!.gx].type).toBe(TileType.BEDROCK);
+      expect(world[core!.gy - 2][core!.gx].hardness).toBe(Infinity);
+      expect(world[core!.gy + 2][core!.gx].type).toBe(TileType.BEDROCK);
+
+      const isLeftWing = core!.gx <= 7;
+      const outerWallX = isLeftWing ? core!.gx - 3 : core!.gx + 3;
+      const inwardGateX = isLeftWing ? core!.gx + 3 : core!.gx - 3;
+      expect(world[core!.gy][outerWallX].type).toBe(TileType.BEDROCK);
+      expect(world[core!.gy][inwardGateX].type).toBe(TileType.MAGMA_ROCK);
+      expect(world[core!.gy + 1][inwardGateX].type).toBe(TileType.MAGMA_ROCK);
     });
 
     it('restores exact tile hardness via applySavedGrid and preserves debt/upgrades in migrateSaveData', () => {
@@ -845,5 +869,245 @@ describe('Polyminer Faz D SVG Icons, Polygon & Segmented Level UI Helpers', () =
     const diamondSvg = renderPolygonSvg(8, '#38bdf8', 20);
     expect((diamondSvg.match(/<path /g) || []).length).toBeGreaterThanOrEqual(3);
     expect(diamondSvg).toContain('<circle ');
+  });
+});
+
+describe('Polyminer Faz F Exploration, Ore Veins, Sealed Core & Deep Hazards Tests', () => {
+  beforeEach(() => {
+    resetBoulders();
+    clearEffects();
+    vi.restoreAllMocks();
+  });
+
+  it('enforces biome ore separation, guaranteed vein/geode supply, scarcity gradient, wing bias & clustering across 10 worlds', () => {
+    let sumK1Pct = 0;
+    let sumK3Pct = 0;
+    let sumK4Pct = 0;
+    let deepWingOres = 0;
+    let deepCenterOres = 0;
+    let deepNeighborSum = 0;
+    let deepOreTiles = 0;
+
+    for (let w = 0; w < 10; w++) {
+      const world = generateWorld();
+      const counts: Record<string, number> = { copper: 0, iron: 0, silver: 0, gold: 0, emerald: 0, diamond: 0 };
+      const relicCounts: Record<string, number> = {};
+      let k1Ores = 0;
+      let k3Ores = 0;
+      let k4Ores = 0;
+
+      for (let y = 4; y < 274; y++) {
+        for (let x = 0; x < GRID_WIDTH; x++) {
+          const tile = world[y][x];
+          if (tile.relicId) {
+            relicCounts[tile.relicId] = (relicCounts[tile.relicId] || 0) + 1;
+          }
+          if (tile.type === TileType.ORE && tile.ore) {
+            const id = tile.ore.id;
+            counts[id] = (counts[id] || 0) + 1;
+
+            // Strict biome separation: NO copper/iron/silver in K3-K4; NO gold/emerald/diamond in K1-K2
+            if (y >= 131) {
+              expect(['copper', 'iron', 'silver']).not.toContain(id);
+            } else {
+              expect(['gold', 'emerald', 'diamond']).not.toContain(id);
+            }
+
+            if (y <= 60) k1Ores++;
+            else if (y >= 131 && y <= 205) k3Ores++;
+            else if (y >= 206 && y <= 273) k4Ores++;
+
+            if (y >= 131) {
+              deepOreTiles++;
+              if (x <= 8 || x >= 15) deepWingOres++;
+              else if (x >= 9 && x <= 14) deepCenterOres++;
+
+              for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                const nb = world[y + dy]?.[x + dx];
+                if (nb?.type === TileType.ORE && nb.ore?.id === id) {
+                  deepNeighborSum++;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Anti-softlock guaranteed minimums
+      expect(counts.diamond, `world ${w} diamond`).toBeGreaterThanOrEqual(15);
+      expect(counts.emerald, `world ${w} emerald`).toBeGreaterThanOrEqual(38);
+      expect(counts.gold, `world ${w} gold`).toBeGreaterThanOrEqual(60);
+
+      // Every relic has >= 4 pre-seeded tiles
+      for (const relicId of Object.keys(RELIC_DEFINITIONS)) {
+        expect(relicCounts[relicId] || 0, `world ${w} relic ${relicId}`).toBeGreaterThanOrEqual(4);
+      }
+
+      sumK1Pct += k1Ores / (57 * GRID_WIDTH);
+      sumK3Pct += k3Ores / (75 * GRID_WIDTH);
+      sumK4Pct += k4Ores / (68 * GRID_WIDTH);
+    }
+
+    const avgK1 = sumK1Pct / 10;
+    const avgK3 = sumK3Pct / 10;
+    const avgK4 = sumK4Pct / 10;
+    expect(avgK4).toBeLessThan(avgK3);
+    expect(avgK3).toBeLessThan(avgK1);
+
+    // Wing-normalized density should exceed center corridor density in K3-K4
+    expect(deepWingOres / 16).toBeGreaterThan(deepCenterOres / 6);
+
+    // Positive spatial clustering for K3-K4 veins (uniform ~6% would be ~0.12)
+    expect(deepNeighborSum / deepOreTiles).toBeGreaterThan(0.6);
+  });
+
+  it('removes 2.5% relic lottery and only awards pre-seeded relics', () => {
+    const player = createPlayer();
+    const plainDirt: Tile = { type: TileType.DIRT, hardness: 1.0, revealed: true };
+    vi.spyOn(Math, 'random').mockReturnValue(0.001);
+
+    checkAndAwardRelicAt(player, plainDirt, 25);
+    expect(player.discoveredRelics).toEqual([]);
+
+    const seededRock: Tile = { type: TileType.ROCK, hardness: ROCK_HARDNESS, revealed: true, relicId: 'trilobite' };
+    checkAndAwardRelicAt(player, seededRock, 25);
+    expect(player.discoveredRelics).toEqual(['trilobite']);
+    expect(seededRock.relicId).toBeUndefined();
+  });
+
+  it('protects BEDROCK and ANCIENT_CORE from detonateDynamite', () => {
+    const world = createEmptyWorld();
+    world[274][10] = { type: TileType.BEDROCK, hardness: Infinity, revealed: true };
+    world[275][11] = {
+      type: TileType.ANCIENT_CORE,
+      ore: ORE_DEFINITIONS.ANCIENT_CORE,
+      hardness: ORE_DEFINITIONS.ANCIENT_CORE.hardness,
+      revealed: true
+    };
+    world[275][10] = { type: TileType.DIRT, hardness: 2.0, revealed: true };
+
+    const player = createPlayer();
+    player.x = 10 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    player.y = 274 * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT) / 2;
+    player.facing = 'right';
+    player.inventory.dynamite = 1;
+
+    expect(detonateDynamite(player, world)).toBe(true);
+    expect(world[274][10].type).toBe(TileType.BEDROCK);
+    expect(world[275][11].type).toBe(TileType.ANCIENT_CORE);
+    expect(world[275][10].type).toBe(TileType.EMPTY);
+    expect(player.hasWon).toBeFalsy();
+  });
+
+  it('allows elevator rails in Biome 1-3 but bans them in Biome 4 Magma Core', () => {
+    const world = createEmptyWorld();
+    const player = createPlayer();
+    player.inventory.elevatorRails = 3;
+
+    // K3 bottom (row 205): allowed
+    player.x = 12 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    player.y = (MAGMA_NO_RAIL_START_ROW - 1) * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT) / 2;
+    expect(deployElevatorRail(player, world)).toBe(true);
+    expect(world[MAGMA_NO_RAIL_START_ROW - 1][12].hasElevator).toBe(true);
+    expect(player.inventory.elevatorRails).toBe(2);
+
+    // K4 Magma start (row 206): blocked cleanly
+    player.y = MAGMA_NO_RAIL_START_ROW * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT) / 2;
+    expect(deployElevatorRail(player, world)).toBe(false);
+    expect(world[MAGMA_NO_RAIL_START_ROW][12].hasElevator).toBeFalsy();
+    expect(player.inventory.elevatorRails).toBe(2);
+  });
+
+  it('applies real Magma thermal heat buildup, cashless Magma damage (42), and stronger Gas damage (35)', () => {
+    const world = createEmptyWorld();
+    world[220][11] = { type: TileType.MAGMA_ROCK, hardness: 2.8, revealed: true };
+    world[221][10] = { type: TileType.DIRT, hardness: 1.0, revealed: true }; // floor under player
+
+    // 1. Lv1 radiator next to MAGMA_ROCK in K4 heats up instead of cooling
+    const pLowRad = createPlayer();
+    pLowRad.x = 10 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    pLowRad.y = 220 * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
+    pLowRad.isGrounded = true;
+    pLowRad.upgrades.radiator = 1;
+    pLowRad.heat = 20;
+    updatePlayer(pLowRad, world, {}, 0.5, false);
+    expect(pLowRad.heat).toBeGreaterThan(25);
+
+    // 2. Lv5 radiator next to MAGMA_ROCK in K4 actively cools down
+    const pHighRad = createPlayer();
+    pHighRad.x = 10 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    pHighRad.y = 220 * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
+    pHighRad.isGrounded = true;
+    pHighRad.upgrades.radiator = 5;
+    pHighRad.heat = 50;
+    updatePlayer(pHighRad, world, {}, 0.5, false);
+    expect(pHighRad.heat).toBeLessThan(38);
+
+    // 3. Drilling MAGMA_ROCK deals 42 base damage, spikes heat, and grants $0 cash
+    const miner = createPlayer();
+    miner.upgrades.drill = 5;
+    miner.drillSpeed = getUpgradeLevelValue('drill', 5);
+    miner.x = 10 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    miner.y = 220 * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
+    miner.startDrillX = miner.x;
+    miner.startDrillY = miner.y;
+    miner.isDrilling = true;
+    miner.facing = 'right';
+    miner.drillTarget = { gx: 11, gy: 220 };
+    miner.drillProgress = 0.99;
+    miner.hull = 100;
+    miner.heat = 0;
+    miner.money = 0;
+
+    updatePlayer(miner, world, { ArrowRight: true }, 0.05, false);
+    expect(miner.hull).toBe(100 - MAGMA_ROCK_BASE_DAMAGE);
+    expect(miner.money).toBe(0);
+    expect(miner.heat).toBeGreaterThanOrEqual(30);
+
+    // 4. Drilling GAS_POCKET deals 35 base damage and spikes heat
+    world[150][11] = { type: TileType.GAS_POCKET, hardness: 1.2, revealed: true };
+    world[151][10] = { type: TileType.DIRT, hardness: 1.0, revealed: true };
+    miner.x = 10 * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+    miner.y = 150 * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
+    miner.startDrillX = miner.x;
+    miner.startDrillY = miner.y;
+    miner.isDrilling = true;
+    miner.facing = 'right';
+    miner.drillTarget = { gx: 11, gy: 150 };
+    miner.drillProgress = 0.99;
+    miner.hull = 100;
+    miner.heat = 0;
+
+    updatePlayer(miner, world, { ArrowRight: true }, 0.05, false);
+    expect(miner.hull).toBe(100 - GAS_POCKET_BASE_DAMAGE);
+    expect(miner.heat).toBeGreaterThanOrEqual(18);
+  });
+
+  it('scales upward thruster fly ceiling speed with engine upgrade tier', () => {
+    expect(getMaxFlySpeed(5)).toBeLessThan(getMaxFlySpeed(1));
+
+    const world = createEmptyWorld();
+    const pLv1 = createPlayer();
+    pLv1.x = 10 * TILE_SIZE;
+    pLv1.y = 40 * TILE_SIZE;
+    pLv1.isGrounded = false;
+    pLv1.upgrades.engine = 1;
+    pLv1.thrusterPower = getUpgradeLevelValue('engine', 1);
+
+    const pLv5 = createPlayer();
+    pLv5.x = 10 * TILE_SIZE;
+    pLv5.y = 40 * TILE_SIZE;
+    pLv5.isGrounded = false;
+    pLv5.upgrades.engine = 5;
+    pLv5.thrusterPower = getUpgradeLevelValue('engine', 5);
+
+    for (let i = 0; i < 20; i++) {
+      updatePlayer(pLv1, world, { ArrowUp: true }, 0.05, false);
+      updatePlayer(pLv5, world, { ArrowUp: true }, 0.05, false);
+    }
+
+    expect(pLv1.vy).toBeCloseTo(getMaxFlySpeed(1), 4);
+    expect(pLv5.vy).toBeCloseTo(getMaxFlySpeed(5), 4);
+    expect(pLv5.vy).toBeLessThan(pLv1.vy);
   });
 });

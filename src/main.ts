@@ -8,6 +8,7 @@ import {
   ROCK_HARDNESS,
   FUEL_COST_PER_LITRE,
   MUSEUM_CURATOR_REWARD,
+  MAGMA_NO_RAIL_START_ROW,
   getBiomeForDepth
 } from './constants';
 import { generateWorld, revealAdjacentTiles, markWorldDirty } from './world';
@@ -22,9 +23,9 @@ import {
   PLAYER_HEIGHT
 } from './player';
 import { UIManager } from './ui';
-import { updateEffects, renderEffects, addFloatingText, getScreenShakeOffset, showBiomeBanner } from './effects';
+import { updateEffects, renderEffects, addFloatingText, getScreenShakeOffset, showBiomeBanner, clearEffects } from './effects';
 import { saveGame, loadGame, applyLoadedGame, resetSave, serializeWorld, applySavedGrid } from './save';
-import { updateBoulders, renderBoulders } from './boulders';
+import { updateBoulders, renderBoulders, resetBoulders } from './boulders';
 import { NetworkManager, MIN_SHARED_MONEY, MAX_SHARED_MONEY, MAX_DEBT_ALLOWED } from './network';
 import { RemotePlayerState, TileType } from './types';
 import { sounds } from './audio';
@@ -97,6 +98,7 @@ let lastSubterraneanBiomeId = getBiomeForDepth(
 
 let wasGuestSession = false;
 let isReloading = false;
+let devPauseAutosave = false;
 
 // Network Manager (P2P WebRTC)
 const network = new NetworkManager({
@@ -147,7 +149,17 @@ const network = new NetworkManager({
         data.gy >= 0 && data.gy < world.length && data.gx >= 0 && data.gx < GRID_WIDTH) {
       const tile = world[data.gy][data.gx];
       if (tile) {
+        if (
+          tile.type === TileType.BEDROCK ||
+          tile.type === TileType.FUEL_PAD ||
+          tile.type === TileType.SHOP_PAD
+        ) {
+          return;
+        }
         if (data.hasElevator) {
+          if (data.gy >= MAGMA_NO_RAIL_START_ROW) {
+            return;
+          }
           tile.hasElevator = true;
           tile.type = TileType.EMPTY;
           tile.revealed = true;
@@ -266,7 +278,7 @@ const network = new NetworkManager({
  * Guest co-op session: skips local overwrite (Host owns the shared world) so solo save remains 100% pristine!
  */
 function safeSaveGame(): boolean {
-  if (wasGuestSession || (network.isConnected && !network.getIsHost())) {
+  if (devPauseAutosave || wasGuestSession || (network.isConnected && !network.getIsHost())) {
     return false;
   }
   return saveGame(player, world, playTime, 'solo');
@@ -777,7 +789,7 @@ function gameLoop(now: number) {
     renderEffects(ctx, cameraY);
     ctx.restore();
 
-    renderScreenOverlays(ctx, canvas.width, canvas.height, player);
+    renderScreenOverlays(ctx, canvas.width, canvas.height, player, world);
     renderMiniRadar(ctx, world, player, cameraY, canvas.width, canvas.height, remotePlayers);
 
     // 5. Update Top HUD
@@ -793,7 +805,58 @@ function gameLoop(now: number) {
   }
 }
 
+function regenerateWorldInPlace(): void {
+  const fresh = generateWorld();
+  world.splice(0, world.length, ...fresh);
+  resetBoulders();
+  clearEffects();
+
+  const startGx = Math.floor(GRID_WIDTH / 2);
+  player.x = startGx * TILE_SIZE + (TILE_SIZE - PLAYER_WIDTH) / 2;
+  player.y = (SURFACE_ROW - 1) * TILE_SIZE + (TILE_SIZE - PLAYER_HEIGHT);
+  player.lastValidX = player.x;
+  player.lastValidY = player.y;
+  player.startDrillX = player.x;
+  player.startDrillY = player.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.isDrilling = false;
+  player.isStruggling = false;
+  player.drillProgress = 0;
+  player.drillTarget = null;
+  player.isThrusting = false;
+  player.isGrounded = true;
+  player.elevatorAuto = null;
+  player.elevatorCol = undefined;
+  player.isInElevator = false;
+  player.heat = 0;
+  player.heatLockoutTimer = 0;
+  player.fuel = player.maxFuel;
+  player.hull = player.maxHull;
+  cameraY = 0;
+  lastSubterraneanBiomeId = getBiomeForDepth(SURFACE_ROW + 1).id;
+}
+
 // Start
 requestAnimationFrame(gameLoop);
 console.log('POLYMINER v2.1: Host-Authoritative Co-op, Dedicated Save Slots, Automated CI/Tests Active.');
+
+if (import.meta.env.DEV) {
+  import('./devPanel').then(({ initDevPanel }) => {
+    initDevPanel({
+      player,
+      world,
+      uiManager,
+      setAutosavePaused: (paused) => {
+        devPauseAutosave = paused;
+      },
+      isAutosavePaused: () => devPauseAutosave,
+      snapCameraToPlayer: () => {
+        const targetCameraY = player.y - canvas.height / 2 + PLAYER_HEIGHT / 2;
+        cameraY = Math.max(minCameraY, Math.min(getMaxCameraY(), targetCameraY));
+      },
+      regenerateWorld: regenerateWorldInPlace
+    });
+  });
+}
 
